@@ -1,0 +1,35 @@
+{
+  "snapshotTakenAt": "2026-08-28T00:00:00.000Z",
+  "note": "Snapshot taken AFTER migration 20240101000000_add_subject_category.sql was applied. subject_category column exists as VARCHAR(64) NULL.",
+  "subjectsRowCount": 5,
+  "subjectsSample": [
+    { "subject_code": "AD3301", "subject_name": "Data visualization",            "credits": 3.0, "is_active": true, "subject_category": null },
+    { "subject_code": "AD3491", "subject_name": "Fundamentals of Data Science",  "credits": 3.0, "is_active": true, "subject_category": null },
+    { "subject_code": "AD3501", "subject_name": "Deep Learning",                 "credits": 3.0, "is_active": true, "subject_category": null },
+    { "subject_code": "CCS335", "subject_name": "Cloud Computing",               "credits": 3.0, "is_active": true, "subject_category": null },
+    { "subject_code": "CW355",  "subject_name": "Data and information security", "credits": 3.0, "is_active": true, "subject_category": null }
+  ],
+  "subjectsSchema": [
+    { "column_name": "id",               "data_type": "uuid",              "is_nullable": "NO"  },
+    { "column_name": "subject_code",     "data_type": "character varying", "is_nullable": "NO"  },
+    { "column_name": "subject_name",     "data_type": "character varying", "is_nullable": "NO"  },
+    { "column_name": "description",      "data_type": "text",              "is_nullable": "YES" },
+    { "column_name": "department_id",    "data_type": "uuid",              "is_nullable": "NO"  },
+    { "column_name": "semester_id",      "data_type": "uuid",              "is_nullable": "NO"  },
+    { "column_name": "credits",          "data_type": "numeric",           "is_nullable": "NO"  },
+    { "column_name": "is_active",        "data_type": "boolean",           "is_nullable": "NO"  },
+    { "column_name": "created_by",       "data_type": "uuid",              "is_nullable": "YES" },
+    { "column_name": "created_at",       "data_type": "timestamp without time zone", "is_nullable": "YES" },
+    { "column_name": "updated_at",       "data_type": "timestamp without time zone", "is_nullable": "YES" },
+    { "column_name": "subject_category", "data_type": "character varying", "is_nullable": "YES", "character_maximum_length": 64 }
+  ],
+  "relatedTableRowCounts": {
+    "academic_years":            1,
+    "course_outcomes":           9,
+    "departments":               3,
+    "semesters":                 2,
+    "staff_subject_assignments": 7,
+    "topics":                    1,
+    "units":                     9
+  }
+}

@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# environment files
+.env
+
+# next.js
+frontend/.next/
+frontend/out/
+
+# backend build output
+backend/dist/
+
+# uploaded runtime documents
+backend/uploads/
+
+# typescript
+*.tsbuildinfo
+
+# logs
+npm-debug.log*
+
+# os
+.DS_Store
+
+
+# local backup / generated data
+backup_internal1/
+pdf_dump.json

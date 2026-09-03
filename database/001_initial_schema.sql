@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS system_status (
+    id SERIAL PRIMARY KEY,
+    service_name VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
