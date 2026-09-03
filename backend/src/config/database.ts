@@ -3,4 +3,8 @@ import { env } from "./env";
 
 export const pool = new Pool({
   connectionString: env.databaseUrl,
+  ssl:
+    process.env.NODE_ENV === "production"
+      ? { rejectUnauthorized: false }
+      : false,
 });
