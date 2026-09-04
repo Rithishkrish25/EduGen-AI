@@ -118,6 +118,10 @@ export interface CreateQuestionPaperInput {
     source:
       | "question_bank"
       | "syllabus"
+      | "staff_notes"
+      | "textbook_material"
+      | "previous_question_paper"
+      | "reference_material"
       | "notes";
   }>;
 

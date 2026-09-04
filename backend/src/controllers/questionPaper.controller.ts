@@ -637,13 +637,23 @@ function validateRegulation2025PartBSplits(
     }
 
     if (
-      typeof entry.mode !==
+      typeof entry.optionA !==
         "string" ||
       !allowedModes.has(
-        entry.mode as Regulation2025SixteenMarkSplit
+        entry.optionA as Regulation2025SixteenMarkSplit
       )
     ) {
-      return `Question ${entry.questionNumber} must use 16, 8+8 or 10+6 marks`;
+      return `Question ${entry.questionNumber} optionA must use 16, 8+8 or 10+6 marks`;
+    }
+
+    if (
+      typeof entry.optionB !==
+        "string" ||
+      !allowedModes.has(
+        entry.optionB as Regulation2025SixteenMarkSplit
+      )
+    ) {
+      return `Question ${entry.questionNumber} optionB must use 16, 8+8 or 10+6 marks`;
     }
 
     seen.add(
@@ -659,8 +669,11 @@ function validateRegulation2025PartBSplits(
           | 14
           | 15,
 
-      mode:
-        entry.mode as Regulation2025SixteenMarkSplit,
+      optionA:
+        entry.optionA as Regulation2025SixteenMarkSplit,
+
+      optionB:
+        entry.optionB as Regulation2025SixteenMarkSplit,
     });
   }
 

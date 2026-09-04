@@ -4020,10 +4020,8 @@ async function fillSlotsForSet(
 
     const effectiveAiSource:
       QuestionPaperSourceMode | null =
-      selectedUnitSource !== null &&
-      selectedUnitSource !==
-        "question_bank"
-        ? selectedUnitSource
+      selectedUnitSource !== null
+        ? (selectedUnitSource as QuestionPaperSourceMode)
         : input.sourceMode;
 
     const groupKey = [
@@ -4076,10 +4074,8 @@ async function fillSlotsForSet(
 
     const generationSourceMode:
       QuestionPaperSourceMode =
-      selectedUnitSource !== null &&
-      selectedUnitSource !==
-        "question_bank"
-        ? selectedUnitSource
+      selectedUnitSource !== null
+        ? (selectedUnitSource as QuestionPaperSourceMode)
         : input.sourceMode ??
           "notes";
 
