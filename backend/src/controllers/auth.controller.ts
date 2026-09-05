@@ -8,7 +8,10 @@ import {
   registerStudent,
   toSafeProfile,
 } from "../services/auth.service";
-import { getDepartmentById, listDepartments } from "../services/department.service";
+import {
+  getDepartmentById,
+  listDepartments,
+} from "../services/department.service";
 import { listActiveSemestersForCurrentYear } from "../services/semester.service";
 import { signAuthToken } from "../utils/jwt";
 import { verifyPassword } from "../utils/password";
@@ -25,8 +28,8 @@ const COOKIE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 function baseCookieOptions(): CookieOptions {
   return {
     httpOnly: true,
-    secure: env.nodeEnv === "production",
-    sameSite: "lax",
+    secure: true,
+    sameSite: "none",
     path: "/",
   };
 }
@@ -37,17 +40,30 @@ export async function postRegisterStudent(
   next: NextFunction
 ) {
   try {
-    const { fullName, email, password, departmentId, year, semester, registerNumber } =
-      req.body ?? {};
+    const {
+      fullName,
+      email,
+      password,
+      departmentId,
+      year,
+      semester,
+      registerNumber,
+    } = req.body ?? {};
 
     if (!isNonEmptyString(fullName)) {
-      res.status(400).json({ success: false, message: "Full name is required" });
+      res
+        .status(400)
+        .json({ success: false, message: "Full name is required" });
       return;
     }
+
     if (!isValidEmail(email)) {
-      res.status(400).json({ success: false, message: "A valid email is required" });
+      res
+        .status(400)
+        .json({ success: false, message: "A valid email is required" });
       return;
     }
+
     if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
       res.status(400).json({
         success: false,
@@ -55,18 +71,31 @@ export async function postRegisterStudent(
       });
       return;
     }
+
     if (!isUuid(departmentId)) {
-      res.status(400).json({ success: false, message: "A valid department is required" });
+      res.status(400).json({
+        success: false,
+        message: "A valid department is required",
+      });
       return;
     }
+
     if (!isPositiveInteger(year)) {
-      res.status(400).json({ success: false, message: "A valid year is required" });
+      res.status(400).json({
+        success: false,
+        message: "A valid year is required",
+      });
       return;
     }
+
     if (!isPositiveInteger(semester)) {
-      res.status(400).json({ success: false, message: "A valid semester is required" });
+      res.status(400).json({
+        success: false,
+        message: "A valid semester is required",
+      });
       return;
     }
+
     if (!isNonEmptyString(registerNumber)) {
       res.status(400).json({
         success: false,
@@ -76,14 +105,22 @@ export async function postRegisterStudent(
     }
 
     const department = await getDepartmentById(departmentId);
+
     if (!department) {
-      res.status(400).json({ success: false, message: "Selected department was not found" });
+      res.status(400).json({
+        success: false,
+        message: "Selected department was not found",
+      });
       return;
     }
 
     const validSemesters = await listActiveSemestersForCurrentYear();
+
     if (!validSemesters.some((s) => s.semester_number === semester)) {
-      res.status(400).json({ success: false, message: "Selected semester is not currently valid" });
+      res.status(400).json({
+        success: false,
+        message: "Selected semester is not currently valid",
+      });
       return;
     }
 
@@ -98,12 +135,19 @@ export async function postRegisterStudent(
       registerNumber,
     });
 
-    res.status(201).json({ success: true, user });
+    res.status(201).json({
+      success: true,
+      user,
+    });
   } catch (error) {
     if (error instanceof ConflictError) {
-      res.status(409).json({ success: false, message: error.message });
+      res.status(409).json({
+        success: false,
+        message: error.message,
+      });
       return;
     }
+
     next(error);
   }
 }
@@ -114,16 +158,28 @@ export async function postRegisterStaff(
   next: NextFunction
 ) {
   try {
-    const { fullName, email, password, departmentId, employeeId } = req.body ?? {};
+    const {
+      fullName,
+      email,
+      password,
+      departmentId,
+      employeeId,
+    } = req.body ?? {};
 
     if (!isNonEmptyString(fullName)) {
-      res.status(400).json({ success: false, message: "Full name is required" });
+      res
+        .status(400)
+        .json({ success: false, message: "Full name is required" });
       return;
     }
+
     if (!isValidEmail(email)) {
-      res.status(400).json({ success: false, message: "A valid email is required" });
+      res
+        .status(400)
+        .json({ success: false, message: "A valid email is required" });
       return;
     }
+
     if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
       res.status(400).json({
         success: false,
@@ -131,18 +187,30 @@ export async function postRegisterStaff(
       });
       return;
     }
+
     if (!isUuid(departmentId)) {
-      res.status(400).json({ success: false, message: "A valid department is required" });
+      res.status(400).json({
+        success: false,
+        message: "A valid department is required",
+      });
       return;
     }
+
     if (!isNonEmptyString(employeeId)) {
-      res.status(400).json({ success: false, message: "Employee ID is required" });
+      res.status(400).json({
+        success: false,
+        message: "Employee ID is required",
+      });
       return;
     }
 
     const department = await getDepartmentById(departmentId);
+
     if (!department) {
-      res.status(400).json({ success: false, message: "Selected department was not found" });
+      res.status(400).json({
+        success: false,
+        message: "Selected department was not found",
+      });
       return;
     }
 
@@ -158,18 +226,27 @@ export async function postRegisterStaff(
     res.status(201).json({
       success: true,
       user,
-      message: "Registration submitted. Your account requires Admin approval before you can sign in.",
+      message:
+        "Registration submitted. Your account requires Admin approval before you can sign in.",
     });
   } catch (error) {
     if (error instanceof ConflictError) {
-      res.status(409).json({ success: false, message: error.message });
+      res.status(409).json({
+        success: false,
+        message: error.message,
+      });
       return;
     }
+
     next(error);
   }
 }
 
-export async function postLogin(req: Request, res: Response, next: NextFunction) {
+export async function postLogin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     const { email, password } = req.body ?? {};
 
@@ -184,14 +261,23 @@ export async function postLogin(req: Request, res: Response, next: NextFunction)
     const user = await findUserByEmail(email);
 
     if (!user) {
-      res.status(401).json({ success: false, message: "Invalid email or password" });
+      res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
       return;
     }
 
-    const passwordMatches = await verifyPassword(password, user.password_hash);
+    const passwordMatches = await verifyPassword(
+      password,
+      user.password_hash
+    );
 
     if (!passwordMatches) {
-      res.status(401).json({ success: false, message: "Invalid email or password" });
+      res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
       return;
     }
 
@@ -213,7 +299,10 @@ export async function postLogin(req: Request, res: Response, next: NextFunction)
       maxAge: COOKIE_MAX_AGE_MS,
     });
 
-    res.json({ success: true, user: toSafeProfile(user) });
+    res.json({
+      success: true,
+      user: toSafeProfile(user),
+    });
   } catch (error) {
     next(error);
   }
@@ -221,24 +310,41 @@ export async function postLogin(req: Request, res: Response, next: NextFunction)
 
 export function postLogout(_req: Request, res: Response) {
   res.clearCookie(env.cookieName, baseCookieOptions());
-  res.json({ success: true, message: "Logged out successfully" });
+
+  res.json({
+    success: true,
+    message: "Logged out successfully",
+  });
 }
 
-export async function getMe(req: Request, res: Response, next: NextFunction) {
+export async function getMe(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Not authenticated" });
+      res.status(401).json({
+        success: false,
+        message: "Not authenticated",
+      });
       return;
     }
 
     const user = await findUserById(req.user.id);
 
     if (!user || !user.is_active) {
-      res.status(401).json({ success: false, message: "Not authenticated" });
+      res.status(401).json({
+        success: false,
+        message: "Not authenticated",
+      });
       return;
     }
 
-    res.json({ success: true, user: toSafeProfile(user) });
+    res.json({
+      success: true,
+      user: toSafeProfile(user),
+    });
   } catch (error) {
     next(error);
   }
@@ -251,7 +357,12 @@ export async function getRegistrationOptions(
 ) {
   try {
     const [departmentsResult, semesters] = await Promise.all([
-      listDepartments({ isActive: true, page: 1, limit: 200, offset: 0 }),
+      listDepartments({
+        isActive: true,
+        page: 1,
+        limit: 200,
+        offset: 0,
+      }),
       listActiveSemestersForCurrentYear(),
     ]);
 
