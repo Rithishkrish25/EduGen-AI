@@ -6,6 +6,7 @@ export class GeminiError extends Error {
 
   constructor(message: string, statusCode: number) {
     super(message);
+    this.name = "GeminiError";
     this.statusCode = statusCode;
   }
 }
@@ -18,7 +19,10 @@ export function isGeminiConfigured(): boolean {
 
 function getClient(): GoogleGenAI {
   if (!isGeminiConfigured()) {
-    throw new GeminiError("Gemini is not configured", 503);
+    throw new GeminiError(
+      "Gemini is not configured",
+      503
+    );
   }
 
   if (!client) {
@@ -32,7 +36,10 @@ function getClient(): GoogleGenAI {
 
 function withTimeoutSignal(
   timeoutMs: number
-): { signal: AbortSignal; cancel: () => void } {
+): {
+  signal: AbortSignal;
+  cancel: () => void;
+} {
   const controller = new AbortController();
 
   const timeout = setTimeout(() => {
@@ -47,24 +54,35 @@ function withTimeoutSignal(
 
 /**
  * Generate text using Gemini.
+ *
+ * Used for:
+ * - Notes
+ * - Quiz
+ * - Question bank
+ * - Question paper
+ * - Assignment
+ * - Answer key
+ * - Ask AI
  */
 export async function generateFromGemini(
   prompt: string
 ): Promise<string> {
   const ai = getClient();
 
-  const { signal, cancel } = withTimeoutSignal(
-    env.geminiTimeoutMs
-  );
+  const { signal, cancel } =
+    withTimeoutSignal(
+      env.geminiTimeoutMs
+    );
 
   try {
-    const response = await ai.models.generateContent({
-      model: env.geminiModel,
-      contents: prompt,
-      config: {
-        abortSignal: signal,
-      },
-    });
+    const response =
+      await ai.models.generateContent({
+        model: env.geminiModel,
+        contents: prompt,
+        config: {
+          abortSignal: signal,
+        },
+      });
 
     const text = response.text;
 
@@ -77,7 +95,10 @@ export async function generateFromGemini(
 
     return text;
   } catch (error) {
-    console.error("Gemini generation error:", error);
+    console.error(
+      "Gemini generation error:",
+      error
+    );
 
     if (error instanceof GeminiError) {
       throw error;
@@ -123,20 +144,22 @@ export async function generateGeminiEmbedding(
 
   const ai = getClient();
 
-  const { signal, cancel } = withTimeoutSignal(
-    env.geminiTimeoutMs
-  );
+  const { signal, cancel } =
+    withTimeoutSignal(
+      env.geminiTimeoutMs
+    );
 
   try {
-    const response = await ai.models.embedContent({
-      model: "gemini-embedding-001",
-      contents: text,
-      config: {
-        outputDimensionality: 768,
-        taskType: "RETRIEVAL_QUERY",
-        abortSignal: signal,
-      },
-    });
+    const response =
+      await ai.models.embedContent({
+        model: "gemini-embedding-001",
+        contents: text,
+        config: {
+          outputDimensionality: 768,
+          taskType: "RETRIEVAL_QUERY",
+          abortSignal: signal,
+        },
+      });
 
     if (
       !response.embeddings ||
@@ -151,7 +174,10 @@ export async function generateGeminiEmbedding(
 
     return response.embeddings[0].values;
   } catch (error) {
-    console.error("Gemini embedding error:", error);
+    console.error(
+      "Gemini embedding error:",
+      error
+    );
 
     if (error instanceof GeminiError) {
       throw error;
@@ -179,7 +205,23 @@ export async function generateGeminiEmbedding(
 }
 
 /**
+ * Maximum number of embedding requests allowed
+ * in one Gemini batch.
+ *
+ * Gemini rejects batches containing more than
+ * 100 requests.
+ */
+const GEMINI_EMBEDDING_BATCH_SIZE = 100;
+
+/**
  * Generate Gemini embeddings for multiple text chunks.
+ *
+ * IMPORTANT:
+ * Gemini allows a maximum of 100 embedding
+ * requests in a single batch.
+ *
+ * Therefore, large documents are automatically
+ * split into batches of 100 or fewer chunks.
  */
 export async function generateGeminiEmbeddings(
   texts: string[]
@@ -197,70 +239,133 @@ export async function generateGeminiEmbeddings(
 
   const ai = getClient();
 
-  const { signal, cancel } = withTimeoutSignal(
-    env.geminiTimeoutMs
-  );
+  const allEmbeddings: number[][] = [];
 
-  try {
-    const response = await ai.models.embedContent({
-      model: "gemini-embedding-001",
-      contents: nonEmpty,
-      config: {
-        outputDimensionality: 768,
-        taskType: "RETRIEVAL_DOCUMENT",
-        abortSignal: signal,
-      },
-    });
+  /**
+   * Process the document in batches.
+   *
+   * Example:
+   *
+   * 250 chunks
+   *   ↓
+   * Batch 1 = 100
+   * Batch 2 = 100
+   * Batch 3 = 50
+   */
+  for (
+    let start = 0;
+    start < nonEmpty.length;
+    start += GEMINI_EMBEDDING_BATCH_SIZE
+  ) {
+    const batch = nonEmpty.slice(
+      start,
+      start + GEMINI_EMBEDDING_BATCH_SIZE
+    );
 
-    if (
-      !response.embeddings ||
-      response.embeddings.length !== nonEmpty.length
-    ) {
-      throw new GeminiError(
-        "Gemini returned an invalid batch embedding response",
-        502
+    const {
+      signal,
+      cancel,
+    } = withTimeoutSignal(
+      env.geminiTimeoutMs
+    );
+
+    try {
+      console.log(
+        `Generating Gemini embeddings: batch ${Math.floor(
+          start /
+            GEMINI_EMBEDDING_BATCH_SIZE
+        ) + 1}, ${batch.length} chunk(s)`
       );
-    }
 
-    return response.embeddings.map((embedding) => {
-      if (!embedding.values) {
+      const response =
+        await ai.models.embedContent({
+          model: "gemini-embedding-001",
+          contents: batch,
+          config: {
+            outputDimensionality: 768,
+            taskType: "RETRIEVAL_DOCUMENT",
+            abortSignal: signal,
+          },
+        });
+
+      if (
+        !response.embeddings ||
+        response.embeddings.length !==
+          batch.length
+      ) {
         throw new GeminiError(
-          "Gemini returned an invalid embedding vector",
+          `Gemini returned an invalid batch embedding response. Expected ${batch.length}, received ${
+            response.embeddings?.length ?? 0
+          }.`,
           502
         );
       }
 
-      return embedding.values;
-    });
-  } catch (error) {
-    console.error(
-      "Gemini batch embedding error:",
-      error
-    );
+      for (
+        const embedding of response.embeddings
+      ) {
+        if (!embedding.values) {
+          throw new GeminiError(
+            "Gemini returned an invalid embedding vector",
+            502
+          );
+        }
 
-    if (error instanceof GeminiError) {
-      throw error;
-    }
-
-    if (
-      error instanceof Error &&
-      error.name === "AbortError"
-    ) {
-      throw new GeminiError(
-        "Gemini batch embedding request timed out",
-        504
+        allEmbeddings.push(
+          embedding.values
+        );
+      }
+    } catch (error) {
+      console.error(
+        `Gemini embedding batch failed at chunk ${start + 1}-${Math.min(
+          start +
+            GEMINI_EMBEDDING_BATCH_SIZE,
+          nonEmpty.length
+        )}:`,
+        error
       );
-    }
 
+      if (error instanceof GeminiError) {
+        throw error;
+      }
+
+      if (
+        error instanceof Error &&
+        error.name === "AbortError"
+      ) {
+        throw new GeminiError(
+          "Gemini batch embedding request timed out",
+          504
+        );
+      }
+
+      throw new GeminiError(
+        error instanceof Error
+          ? `Gemini batch embedding failed: ${error.message}`
+          : "Unable to generate Gemini embeddings",
+        502
+      );
+    } finally {
+      cancel();
+    }
+  }
+
+  /**
+   * Safety check:
+   * Number of generated vectors must equal
+   * number of non-empty chunks.
+   */
+  if (
+    allEmbeddings.length !==
+    nonEmpty.length
+  ) {
     throw new GeminiError(
-      error instanceof Error
-        ? `Gemini batch embedding failed: ${error.message}`
-        : "Unable to generate Gemini embeddings",
+      `Embedding count mismatch. Expected ${nonEmpty.length}, received ${allEmbeddings.length}.`,
       502
     );
-  } finally {
-    cancel();
   }
+
+  return allEmbeddings;
 }
 
 /**
