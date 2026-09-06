@@ -45,6 +45,9 @@ function withTimeoutSignal(
   };
 }
 
+/**
+ * Generate text using Gemini.
+ */
 export async function generateFromGemini(
   prompt: string
 ): Promise<string> {
@@ -74,6 +77,8 @@ export async function generateFromGemini(
 
     return text;
   } catch (error) {
+    console.error("Gemini generation error:", error);
+
     if (error instanceof GeminiError) {
       throw error;
     }
@@ -89,7 +94,9 @@ export async function generateFromGemini(
     }
 
     throw new GeminiError(
-      "Unable to reach Gemini",
+      error instanceof Error
+        ? `Gemini generation failed: ${error.message}`
+        : "Unable to reach Gemini",
       502
     );
   } finally {
@@ -102,7 +109,7 @@ export async function generateFromGemini(
  *
  * Used for:
  * - RAG queries
- * - semantic search
+ * - Semantic search
  */
 export async function generateGeminiEmbedding(
   text: string
@@ -127,6 +134,7 @@ export async function generateGeminiEmbedding(
       config: {
         outputDimensionality: 768,
         taskType: "RETRIEVAL_QUERY",
+        abortSignal: signal,
       },
     });
 
@@ -143,6 +151,8 @@ export async function generateGeminiEmbedding(
 
     return response.embeddings[0].values;
   } catch (error) {
+    console.error("Gemini embedding error:", error);
+
     if (error instanceof GeminiError) {
       throw error;
     }
@@ -158,7 +168,9 @@ export async function generateGeminiEmbedding(
     }
 
     throw new GeminiError(
-      "Unable to generate Gemini embedding",
+      error instanceof Error
+        ? `Gemini embedding failed: ${error.message}`
+        : "Unable to generate Gemini embedding",
       502
     );
   } finally {
@@ -196,6 +208,7 @@ export async function generateGeminiEmbeddings(
       config: {
         outputDimensionality: 768,
         taskType: "RETRIEVAL_DOCUMENT",
+        abortSignal: signal,
       },
     });
 
@@ -220,6 +233,11 @@ export async function generateGeminiEmbeddings(
       return embedding.values;
     });
   } catch (error) {
+    console.error(
+      "Gemini batch embedding error:",
+      error
+    );
+
     if (error instanceof GeminiError) {
       throw error;
     }
@@ -229,13 +247,15 @@ export async function generateGeminiEmbeddings(
       error.name === "AbortError"
     ) {
       throw new GeminiError(
-        "Gemini embedding request timed out",
+        "Gemini batch embedding request timed out",
         504
       );
     }
 
     throw new GeminiError(
-      "Unable to generate Gemini embeddings",
+      error instanceof Error
+        ? `Gemini batch embedding failed: ${error.message}`
+        : "Unable to generate Gemini embeddings",
       502
     );
   } finally {
@@ -243,6 +263,9 @@ export async function generateGeminiEmbeddings(
   }
 }
 
+/**
+ * Check Gemini availability.
+ */
 export async function checkGeminiHealth(): Promise<boolean> {
   if (!isGeminiConfigured()) {
     return false;
