@@ -33,21 +33,35 @@ import {
 } from "../utils/pagination";
 
 /* -------------------------------------------------------------------------- */
-/* Column list                                                               */
+/* Column list                                                                */
 /* -------------------------------------------------------------------------- */
 
-const QB_COLUMNS = `id, subject_id, unit_id, topic_id, question_text, marks, difficulty, bloom_level,
-  course_outcome_id, question_type, source, source_document_id, created_by, is_approved, is_active,
-  usage_count, last_used_at, created_at, updated_at`;
+const QB_COLUMNS = `
+  id,
+  subject_id,
+  unit_id,
+  topic_id,
+  question_text,
+  marks,
+  difficulty,
+  bloom_level,
+  course_outcome_id,
+  question_type,
+  source,
+  source_document_id,
+  created_by,
+  is_approved,
+  is_active,
+  usage_count,
+  last_used_at,
+  created_at,
+  updated_at
+`;
 
 /* -------------------------------------------------------------------------- */
-/* Normalisation helper                                                      */
+/* Normalisation                                                              */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Collapses whitespace, strips punctuation and lowercases a question string
- * so near-identical questions can be compared for deduplication.
- */
 export function normalizeQuestionText(text: string): string {
   return text
     .toLowerCase()
@@ -57,47 +71,26 @@ export function normalizeQuestionText(text: string): string {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Source-leak protection                                                    */
+/* Source leak protection                                                     */
 /* -------------------------------------------------------------------------- */
 
 function containsQuestionSourceLeak(text: string): boolean {
   const value = text.trim();
 
   const forbiddenPatterns: RegExp[] = [
-    /*
-     * Any literal PDF file name.
-     *
-     * Examples:
-     * AD3301_Data_Visualization.pdf
-     * notes.pdf
-     */
     /\b[A-Za-z0-9_.-]+\.pdf\b/i,
 
-    /*
-     * Product/platform name must never appear
-     * inside an academic exam question.
-     */
     /\bedugen\s*ai\b/i,
 
-    /*
-     * Direct page references.
-     *
-     * Examples:
-     * page 1
-     * page 23
-     * p. 5
-     */
     /\bpage\s+\d+\b/i,
+
     /\bp\.\s*\d+\b/i,
 
-    /*
-     * Explicit source/context wording.
-     */
     /\baccording\s+to\s+(?:the\s+)?(?:(?:provided|uploaded|approved|given)\s+)?(?:context|material|materials|document|documents|pdf|file|source|sources)\b/i,
 
     /\bbased\s+on\s+(?:the\s+)?(?:(?:provided|uploaded|approved|given)\s+)?(?:context|material|materials|document|documents|pdf|file|source|sources)\b/i,
 
-    /\bfrom\s+(?:the\s+)?(?:(?:provided|uploaded|approved|given)\s+)(?:context|material|materials|document|documents|pdf|file|source|sources)\b/i,
+    /\bfrom\s+(?:the\s+)?(?:(?:provided|uploaded|approved|given)\s+)(?:context|material|materials|document|documents|source|sources)\b/i,
 
     /\bprovided\s+(?:academic\s+)?(?:context|material|materials|document|documents|source|sources)\b/i,
 
@@ -105,12 +98,10 @@ function containsQuestionSourceLeak(text: string): boolean {
 
     /\bapproved\s+(?:academic\s+)?(?:context|material|materials|document|documents|source|sources)\b/i,
 
-    /*
-     * Common RAG leakage phrases.
-     */
     /\bretrieved\s+(?:context|chunk|chunks|material|document)\b/i,
 
     /\bcontext\s+above\b/i,
+
     /\bcontext\s+below\b/i,
 
     /\bsource\s+(?:document|file|material)\b/i,
@@ -119,56 +110,35 @@ function containsQuestionSourceLeak(text: string): boolean {
 
     /\bfile\s+(?:name|title)\b/i,
 
-    /*
-     * Question explicitly referring to
-     * "the text above" or "the supplied content".
-     */
     /\b(?:given|supplied)\s+(?:text|content|document|material)\b/i,
   ];
 
-  return forbiddenPatterns.some((pattern) => pattern.test(value));
+  return forbiddenPatterns.some((pattern) =>
+    pattern.test(value)
+  );
 }
 
-/**
- * Prevent metadata-like topic labels from encouraging
- * the model to repeat a file name or page reference.
- */
+/* -------------------------------------------------------------------------- */
+/* Safe topic label                                                           */
+/* -------------------------------------------------------------------------- */
+
 function safeTopicLabel(topicLabel: string): string {
   const cleaned = topicLabel
-    /*
-     * Remove PDF names.
-     */
     .replace(/[A-Za-z0-9_(). -]+\.pdf/gi, "")
-
-    /*
-     * Remove page references.
-     */
     .replace(/\bpage\s+\d+\b/gi, "")
     .replace(/\bp\.\s*\d+\b/gi, "")
-
-    /*
-     * Remove EduGen AI wording.
-     */
     .replace(/\bedugen\s*ai\b/gi, "")
-
-    /*
-     * Clean separators and whitespace.
-     */
-    .replace(/[_|]+/g, " ")
+    .replace(/[\_|]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  /*
-   * If source metadata was basically the whole label,
-   * use a neutral academic label.
-   */
   return cleaned.length >= 3
     ? cleaned
     : "the assigned syllabus topic";
 }
 
 /* -------------------------------------------------------------------------- */
-/* CRUD                                                                      */
+/* CRUD                                                                       */
 /* -------------------------------------------------------------------------- */
 
 export interface CreateQuestionBankItemInput {
@@ -191,11 +161,29 @@ export async function createQuestionBankItem(
   input: CreateQuestionBankItemInput
 ): Promise<QuestionBankRow> {
   const result = await pool.query<QuestionBankRow>(
-    `INSERT INTO question_bank
-       (subject_id, unit_id, topic_id, question_text, marks, difficulty, bloom_level,
-        course_outcome_id, question_type, source, source_document_id, created_by, is_approved)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-     RETURNING ${QB_COLUMNS}`,
+    `
+      INSERT INTO question_bank
+      (
+        subject_id,
+        unit_id,
+        topic_id,
+        question_text,
+        marks,
+        difficulty,
+        bloom_level,
+        course_outcome_id,
+        question_type,
+        source,
+        source_document_id,
+        created_by,
+        is_approved
+      )
+      VALUES
+      (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+      )
+      RETURNING ${QB_COLUMNS}
+    `,
     [
       input.subjectId,
       input.unitId,
@@ -220,9 +208,11 @@ export async function getQuestionBankItemById(
   id: string
 ): Promise<QuestionBankRow | null> {
   const result = await pool.query<QuestionBankRow>(
-    `SELECT ${QB_COLUMNS}
-     FROM question_bank
-     WHERE id = $1`,
+    `
+      SELECT ${QB_COLUMNS}
+      FROM question_bank
+      WHERE id = $1
+    `,
     [id]
   );
 
@@ -245,18 +235,21 @@ export async function updateQuestionBankItem(
   input: UpdateQuestionBankItemInput
 ): Promise<QuestionBankRow | null> {
   const result = await pool.query<QuestionBankRow>(
-    `UPDATE question_bank
-     SET question_text = $1,
-         marks = $2,
-         difficulty = $3,
-         bloom_level = $4,
-         course_outcome_id = $5,
-         question_type = $6,
-         unit_id = $7,
-         topic_id = $8,
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = $9
-     RETURNING ${QB_COLUMNS}`,
+    `
+      UPDATE question_bank
+      SET
+        question_text = $1,
+        marks = $2,
+        difficulty = $3,
+        bloom_level = $4,
+        course_outcome_id = $5,
+        question_type = $6,
+        unit_id = $7,
+        topic_id = $8,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $9
+      RETURNING ${QB_COLUMNS}
+    `,
     [
       input.questionText.trim(),
       input.marks,
@@ -278,11 +271,14 @@ export async function setQuestionBankApproval(
   isApproved: boolean
 ): Promise<QuestionBankRow | null> {
   const result = await pool.query<QuestionBankRow>(
-    `UPDATE question_bank
-     SET is_approved = $1,
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = $2
-     RETURNING ${QB_COLUMNS}`,
+    `
+      UPDATE question_bank
+      SET
+        is_approved = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING ${QB_COLUMNS}
+    `,
     [isApproved, id]
   );
 
@@ -294,11 +290,14 @@ export async function setQuestionBankActiveStatus(
   isActive: boolean
 ): Promise<QuestionBankRow | null> {
   const result = await pool.query<QuestionBankRow>(
-    `UPDATE question_bank
-     SET is_active = $1,
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = $2
-     RETURNING ${QB_COLUMNS}`,
+    `
+      UPDATE question_bank
+      SET
+        is_active = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING ${QB_COLUMNS}
+    `,
     [isActive, id]
   );
 
@@ -309,14 +308,16 @@ export async function deleteQuestionBankItem(
   id: string
 ): Promise<void> {
   await pool.query(
-    `DELETE FROM question_bank
-     WHERE id = $1`,
+    `
+      DELETE FROM question_bank
+      WHERE id = $1
+    `,
     [id]
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/* List / filter                                                             */
+/* List / filter                                                              */
 /* -------------------------------------------------------------------------- */
 
 export interface QuestionBankFilters {
@@ -344,13 +345,13 @@ export async function listQuestionBank(
   const values: unknown[] = [subjectId];
 
   const add = (
-    expr: string,
+    expression: string,
     value: unknown
   ) => {
     values.push(value);
 
     conditions.push(
-      `${expr} = $${values.length}`
+      `${expression} = $${values.length}`
     );
   };
 
@@ -407,14 +408,18 @@ export async function listQuestionBank(
     );
   }
 
-  const where = `WHERE ${conditions.join(" AND ")}`;
+  const where = `
+    WHERE ${conditions.join(" AND ")}
+  `;
 
   const countResult = await pool.query<{
     count: string;
   }>(
-    `SELECT COUNT(*)
-     FROM question_bank
-     ${where}`,
+    `
+      SELECT COUNT(*)
+      FROM question_bank
+      ${where}
+    `,
     values
   );
 
@@ -428,15 +433,18 @@ export async function listQuestionBank(
     pagination.offset,
   ];
 
-  const result = await pool.query<QuestionBankRow>(
-    `SELECT ${QB_COLUMNS}
-     FROM question_bank
-     ${where}
-     ORDER BY created_at DESC
-     LIMIT $${dataValues.length - 1}
-     OFFSET $${dataValues.length}`,
-    dataValues
-  );
+  const result =
+    await pool.query<QuestionBankRow>(
+      `
+        SELECT ${QB_COLUMNS}
+        FROM question_bank
+        ${where}
+        ORDER BY created_at DESC
+        LIMIT $${dataValues.length - 1}
+        OFFSET $${dataValues.length}
+      `,
+      dataValues
+    );
 
   return buildPaginatedResult(
     result.rows,
@@ -446,7 +454,7 @@ export async function listQuestionBank(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Bank query used during paper generation                                    */
+/* Approved question-bank lookup                                              */
 /* -------------------------------------------------------------------------- */
 
 export interface ApprovedBankQuestionFilters {
@@ -458,13 +466,6 @@ export interface ApprovedBankQuestionFilters {
   excludeIds?: string[];
 }
 
-/**
- * Returns approved and active question-bank items
- * matching the paper-generation slot.
- *
- * Source-leaking questions are excluded before the
- * paper generator sees them.
- */
 export async function findApprovedBankQuestions(
   subjectId: string,
   filters: ApprovedBankQuestionFilters,
@@ -479,13 +480,13 @@ export async function findApprovedBankQuestions(
   const values: unknown[] = [subjectId];
 
   const add = (
-    expr: string,
+    expression: string,
     value: unknown
   ) => {
     values.push(value);
 
     conditions.push(
-      `${expr} = $${values.length}`
+      `${expression} = $${values.length}`
     );
   };
 
@@ -529,11 +530,6 @@ export async function findApprovedBankQuestions(
     );
   }
 
-  /*
-   * Fetch more than the requested amount because
-   * source-leaking historical questions may be
-   * removed after the database query.
-   */
   const fetchLimit = Math.max(
     limit * 4,
     40
@@ -541,15 +537,19 @@ export async function findApprovedBankQuestions(
 
   values.push(fetchLimit);
 
-  const result = await pool.query<QuestionBankRow>(
-    `SELECT ${QB_COLUMNS}
-     FROM question_bank
-     WHERE ${conditions.join(" AND ")}
-     ORDER BY usage_count ASC,
-              RANDOM()
-     LIMIT $${values.length}`,
-    values
-  );
+  const result =
+    await pool.query<QuestionBankRow>(
+      `
+        SELECT ${QB_COLUMNS}
+        FROM question_bank
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY
+          usage_count ASC,
+          RANDOM()
+        LIMIT $${values.length}
+      `,
+      values
+    );
 
   return result.rows
     .filter(
@@ -562,13 +562,9 @@ export async function findApprovedBankQuestions(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Usage tracking                                                            */
+/* Usage tracking                                                             */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Increments usage_count and sets last_used_at
- * for bank items used in a committed paper.
- */
 export async function markQuestionBankItemsUsed(
   ids: string[]
 ): Promise<void> {
@@ -577,17 +573,20 @@ export async function markQuestionBankItemsUsed(
   }
 
   await pool.query(
-    `UPDATE question_bank
-     SET usage_count = usage_count + 1,
-         last_used_at = CURRENT_TIMESTAMP,
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = ANY($1::uuid[])`,
+    `
+      UPDATE question_bank
+      SET
+        usage_count = usage_count + 1,
+        last_used_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ANY($1::uuid[])
+    `,
     [ids]
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI generation                                                             */
+/* AI generation input                                                        */
 /* -------------------------------------------------------------------------- */
 
 export interface GenerateQuestionsInput {
@@ -603,34 +602,21 @@ export interface GenerateQuestionsInput {
 
   questionCount: number;
 
-  /**
-   * null / undefined:
-   *   existing general Question Bank generation behaviour.
-   *
-   * "notes":
-   *   staff_notes + textbook_material only.
-   *
-   * "syllabus":
-   *   syllabus only.
-   *
-   * The RAG layer does not fall back between these source modes.
-   */
   sourceMode?: QuestionPaperSourceMode | null;
 
-  /**
-   * Optional question type constraint.
-   */
   questionType?: QuestionType | null;
 }
 
 export interface GenerateQuestionsResult {
   created: QuestionBankRow[];
+
   skippedDuplicates: number;
+
   citations: RagCitation[];
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI candidate diversity helpers                                            */
+/* AI diversity                                                               */
 /* -------------------------------------------------------------------------- */
 
 const AI_GENERATION_NEAR_DUPLICATE_THRESHOLD = 0.78;
@@ -680,7 +666,9 @@ function generationSimilarityTokens(
     .filter(
       (token) =>
         token.length > 1 &&
-        !AI_GENERATION_STOP_WORDS.has(token)
+        !AI_GENERATION_STOP_WORDS.has(
+          token
+        )
     );
 }
 
@@ -689,10 +677,14 @@ function generatedQuestionSimilarity(
   secondText: string
 ): number {
   const first =
-    generationSimilarityTokens(firstText);
+    generationSimilarityTokens(
+      firstText
+    );
 
   const second =
-    generationSimilarityTokens(secondText);
+    generationSimilarityTokens(
+      secondText
+    );
 
   if (
     first.length === 0 ||
@@ -744,7 +736,9 @@ function isNearDuplicateGeneratedQuestion(
   existingTexts: Iterable<string>
 ): boolean {
   const normalizedCandidate =
-    normalizeQuestionText(candidate);
+    normalizeQuestionText(
+      candidate
+    );
 
   for (const existing of existingTexts) {
     if (
@@ -768,26 +762,47 @@ function isNearDuplicateGeneratedQuestion(
   return false;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Marks guidance                                                             */
+/* -------------------------------------------------------------------------- */
+
 function marksDepthGuidance(
   marks: number
 ): string {
   if (marks <= 2) {
-    return "Use one precise supported concept, definition, purpose, property, component, step or distinction suitable for a short answer.";
+    return `
+Use one precise supported concept, definition,
+purpose, property, component, step or distinction
+suitable for a short answer.
+`;
   }
 
   if (marks <= 6) {
-    return "Use a focused supported sub-topic that can be explained, illustrated, applied or compared with enough depth for a medium-length answer.";
+    return `
+Use a focused supported sub-topic that can be
+explained, illustrated, applied or compared with
+enough depth for a medium-length answer.
+`;
   }
 
   if (marks <= 10) {
-    return "Use a substantial supported concept or combine closely related supported sub-topics for explanation, application, comparison or analysis.";
+    return `
+Use a substantial supported concept or combine
+closely related supported sub-topics for explanation,
+application, comparison or analysis.
+`;
   }
 
-  return "Use a comprehensive supported theme. When needed, combine multiple related sub-topics/components from the same permitted academic scope so the question has enough depth for a long answer.";
+  return `
+Use a comprehensive supported theme.
+Combine multiple related sub-topics/components from
+the same permitted academic scope when necessary so
+the question has enough depth for a long answer.
+`;
 }
 
 /* -------------------------------------------------------------------------- */
-/* Bloom Action Verb Guidance                                                */
+/* Bloom guidance                                                             */
 /* -------------------------------------------------------------------------- */
 
 const BLOOM_ACTION_VERBS: Record<
@@ -805,7 +820,6 @@ const BLOOM_ACTION_VERBS: Record<
     "Where",
     "Which",
     "Who",
-    "Why",
   ],
 
   L2: [
@@ -834,6 +848,7 @@ const BLOOM_ACTION_VERBS: Record<
     "Organize",
     "Solve",
     "Utilize",
+    "Use",
   ],
 
   L4: [
@@ -888,55 +903,79 @@ const BLOOM_ACTION_VERBS: Record<
 function bloomVerbGuidance(
   bloomLevel: BloomLevel
 ): string {
-  return BLOOM_ACTION_VERBS[bloomLevel].join(
-    ", "
-  );
+  return BLOOM_ACTION_VERBS[
+    bloomLevel
+  ].join(", ");
 }
+
+/*
+ * IMPORTANT FIX:
+ *
+ * Previous version required the generated question
+ * to literally start with the exact Bloom verb.
+ *
+ * That was too strict and could reject otherwise valid
+ * AI questions.
+ *
+ * Now we only validate the leading command when it is
+ * clearly present.
+ */
 
 function questionUsesExpectedBloomVerb(
   questionText: string,
   bloomLevel: BloomLevel
 ): boolean {
-  if (
-    !["L1", "L2", "L3", "L4"].includes(
-      bloomLevel
-    )
-  ) {
-    return true;
-  }
-
   const normalized =
     questionText
       .trim()
-      .toLowerCase()
       .replace(
         /^[\d().\-\s]+/,
         ""
       );
 
-  return BLOOM_ACTION_VERBS[
-    bloomLevel
-  ].some((verb) => {
-    const lowerVerb =
-      verb.toLowerCase();
+  if (
+    normalized.length === 0
+  ) {
+    return false;
+  }
 
-    return (
-      normalized === lowerVerb ||
-      normalized.startsWith(
-        `${lowerVerb} `
-      ) ||
-      normalized.startsWith(
-        `${lowerVerb}:`
-      ) ||
-      normalized.startsWith(
-        `${lowerVerb}?`
-      )
-    );
-  });
+  const lower =
+    normalized.toLowerCase();
+
+  const verbs =
+    BLOOM_ACTION_VERBS[
+      bloomLevel
+    ];
+
+  /*
+   * Accept normal question forms:
+   *
+   * What is...
+   * Explain...
+   * Compare...
+   * Apply...
+   *
+   * This prevents valid questions from being
+   * rejected just because of punctuation.
+   */
+
+  return verbs.some(
+    (verb) => {
+      const v =
+        verb.toLowerCase();
+
+      return (
+        lower === v ||
+        lower.startsWith(`${v} `) ||
+        lower.startsWith(`${v}:`) ||
+        lower.startsWith(`${v}?`)
+      );
+    }
+  );
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI prompt                                                                 */
+/* Prompt                                                                     */
 /* -------------------------------------------------------------------------- */
 
 function buildQuestionGenerationPrompt(
@@ -971,19 +1010,27 @@ function buildQuestionGenerationPrompt(
   };
 
   const cleanTopicLabel =
-    safeTopicLabel(topicLabel);
+    safeTopicLabel(
+      topicLabel
+    );
 
   const sourceScopeNote =
     topicLabel.trim().length > 0
-      ? "Stay strictly within the supplied academic scope and do not introduce concepts outside it."
-      : "Stay strictly within the supplied academic context.";
+      ? `
+Stay strictly within the supplied academic
+scope. Do not introduce concepts outside it.
+`
+      : `
+Stay strictly within the supplied academic context.
+`;
 
   const exclusionNote =
     excludeTexts.length > 0
       ? `
 ALREADY USED QUESTIONS:
 
-Do NOT repeat, paraphrase too closely, or generate a question with the same core idea as these:
+Do NOT repeat, paraphrase too closely, or generate
+a question with the same core idea as these:
 
 ${excludeTexts
   .slice(0, 30)
@@ -1000,15 +1047,23 @@ ${excludeTexts
       ? `
 QUESTION TYPE CONSTRAINT:
 
-- Question type: ${QUESTION_TYPE_LABELS[questionType]}
-- ${QUESTION_TYPE_PROMPT_GUIDANCE[questionType]}
+Question type:
+${QUESTION_TYPE_LABELS[questionType]}
+
+Guidance:
+${QUESTION_TYPE_PROMPT_GUIDANCE[questionType]}
+
+Follow this question type exactly.
 `
       : "";
 
   return `
-You are an experienced college faculty member preparing an official university-style examination question paper.
+You are an experienced college faculty member
+preparing an official university-style examination
+question paper.
 
-Generate exactly ${questionCount} candidate exam question(s).
+Generate exactly ${questionCount} candidate exam
+question(s).
 
 ACADEMIC TOPIC / UNIT SCOPE:
 
@@ -1019,63 +1074,99 @@ QUESTION REQUIREMENTS:
 - Each question must be worth exactly ${marks} mark(s).
 - Difficulty level: ${difficultyLabel[difficulty]}.
 - Bloom's Taxonomy level: ${bloomLabel[bloomLevel]}.
-- REQUIRED ACTION VERBS for this Bloom level: ${bloomVerbGuidance(bloomLevel)}.
-- Begin every generated question with ONE suitable action verb / question word from that required list.
-- Do NOT use a lower-level command verb as the leading command when the requested Bloom level is higher.
-- For L1, ask remembering/recall questions only.
-- For L2, ask understanding/explanation/interpretation/comparison questions only.
-- For L3, ask application/problem-use/model/construct/solve questions only.
-- For L4, ask analysis/comparison/distinguishing/examination questions only.
-- Use ONLY academically supported concepts from the context.
+- Preferred action verbs: ${bloomVerbGuidance(bloomLevel)}.
+
+- Every question must match the requested Bloom level.
+- Every question should preferably begin with a suitable
+  Bloom action verb or question word.
+- Do not use a lower-level command as the main command
+  when the requested Bloom level is higher.
+
+Bloom requirements:
+
+L1:
+Ask remembering or recall questions only.
+
+L2:
+Ask understanding, explanation, interpretation,
+classification or comparison questions.
+
+L3:
+Ask application, construction, modelling, usage,
+problem-solving or practical-use questions.
+
+L4:
+Ask analysis, comparison, distinction,
+classification or examination questions.
+
+L5:
+Ask evaluation, assessment, judgement,
+justification or recommendation questions.
+
+L6:
+Ask creation, design, formulation, development
+or proposal questions.
+
+- Use ONLY academically supported concepts.
 - ${sourceScopeNote}
 - ${marksDepthGuidance(marks)}
 - Every question must be complete and standalone.
-- Write the question exactly as it should appear in an official college question paper.
-- Use clear, professional academic language.
-- The question must test the requested Bloom level and difficulty.
-- Questions must be meaningfully different from each other.
-- Do not add numbering because numbering is added separately by the question-paper system.
+- Write the question exactly as it should appear in
+  an official college question paper.
+- Use clear professional academic English.
+- Questions must be meaningfully different.
+- Do not add numbering.
+- Do not add answers.
+- Do not add explanations.
 
-TOPIC -> SUB-TOPIC EXPANSION RULES:
+TOPIC -> SUB-TOPIC EXPANSION:
 
-- A syllabus or note may contain only one or a few MAIN TOPICS. Do NOT treat a small number of topic headings as insufficient by itself.
-- First inspect the academic context and identify the supported sub-topics, components, stages, operations, properties, mechanisms, comparisons, applications, advantages, limitations, relationships or examples that are actually present.
-- A sub-topic may be used ONLY when the underlying concept is explicitly present or clearly supported by the supplied academic context.
-- If one main topic contains several supported sub-topics/components, generate different questions from those different aspects.
-- If multiple supported sub-topics are required to create a valid high-mark question, combine closely related sub-topics from the SAME permitted academic scope.
-- For short-mark questions, prefer one specific supported concept.
-- For long-mark questions, use deeper explanation, process, application, comparison or analysis only where the context supports it.
-- Vary the academic angle when valid: definition, purpose, working/process, component role, comparison, application, analysis, advantages/limitations, relationship or design reasoning.
-- Do NOT invent an unrelated topic merely to create variety.
-- Do NOT move to another Unit or another source type.
+- Identify all supported sub-topics, components,
+  stages, operations, properties, mechanisms,
+  applications, advantages, limitations,
+  relationships and examples present in the academic
+  context.
+
+- A small number of topic headings does NOT mean the
+  topic is insufficient.
+
+- If one main topic contains multiple supported
+  components, create different questions from
+  different components.
+
+- For high-mark questions, combine closely related
+  supported concepts from the SAME Unit only.
+
+- Do NOT invent unrelated topics.
+
+- Do NOT move to another Unit.
+
+- Do NOT move to another source type.
 
 ${questionTypeInstruction}
 
-STRICT SOURCE PRIVACY RULES:
+STRICT SOURCE PRIVACY:
 
-- NEVER mention a PDF name.
-- NEVER mention a file name.
-- NEVER mention a document name.
-- NEVER mention a page number.
-- NEVER mention a chunk number.
-- NEVER mention a source name.
-- NEVER mention "EduGen AI".
-- NEVER mention "provided material".
-- NEVER mention "uploaded material".
-- NEVER mention "approved material".
-- NEVER mention "provided context".
-- NEVER mention "context above" or "context below".
-- NEVER write phrases such as "according to the PDF".
-- NEVER write phrases such as "according to the document".
-- NEVER write phrases such as "according to the material".
-- NEVER write phrases such as "based on the provided context".
-- NEVER reveal where the academic information came from.
+NEVER mention:
 
-IMPORTANT:
+- PDF file names
+- file names
+- document names
+- page numbers
+- chunk numbers
+- source names
+- EduGen AI
+- provided material
+- uploaded material
+- approved material
+- provided context
+- context above
+- context below
+- RAG
+- retrieved context
 
-The academic context is only evidence for understanding the permitted course content.
-
-The student seeing the final question must NOT know that a PDF, RAG system, file, page, source, or AI system was used.
+The student must only see a normal academic
+examination question.
 
 ${exclusionNote}
 
@@ -1085,7 +1176,17 @@ ${contextBlock}
 
 OUTPUT FORMAT:
 
-Return ONLY a valid JSON array containing exactly ${questionCount} question string(s).
+Return ONLY a valid JSON array.
+
+The array must contain exactly
+${questionCount} question strings.
+
+Example:
+
+[
+  "Explain the significance of exploratory data analysis.",
+  "Illustrate the major stages involved in exploratory data analysis."
+]
 
 Do not include:
 
@@ -1097,34 +1198,32 @@ Do not include:
 - markdown
 - code fences
 - JSON object keys
-
-Example:
-
-["Explain the significance of exploratory data analysis.","Illustrate the major stages involved in exploratory data analysis."]
 `.trim();
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI response parser                                                        */
+/* AI response parser                                                         */
 /* -------------------------------------------------------------------------- */
 
 function parseGeneratedQuestions(
   raw: string
 ): string[] {
-  const cleaned = raw
-    .trim()
-    .replace(
-      /^```(?:json)?/i,
-      ""
-    )
-    .replace(
-      /```$/,
-      ""
-    )
-    .trim();
+  const cleaned =
+    raw
+      .trim()
+      .replace(
+        /^```(?:json)?/i,
+        ""
+      )
+      .replace(
+        /```$/,
+        ""
+      )
+      .trim();
 
   try {
-    const parsed = JSON.parse(cleaned);
+    const parsed =
+      JSON.parse(cleaned);
 
     if (Array.isArray(parsed)) {
       return parsed.filter(
@@ -1136,17 +1235,23 @@ function parseGeneratedQuestions(
       );
     }
   } catch {
-    /*
-     * Fall through to quoted-string extraction.
-     */
+    // fallback below
   }
+
+  /*
+   * Fallback for models that return:
+   *
+   * "Question 1..."
+   * "Question 2..."
+   */
 
   const matches = [
     ...cleaned.matchAll(
       /"([^"]+)"/g
     ),
   ].map(
-    (match) => match[1]
+    (match) =>
+      match[1]
   );
 
   return matches.filter(
@@ -1156,82 +1261,119 @@ function parseGeneratedQuestions(
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI-generated question-bank questions                                      */
+/* AI question generation                                                     */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Generates question-bank questions using
- * approved RAG context.
- *
- * Source citations are returned separately for
- * internal traceability, but are NEVER placed
- * inside question_text.
- */
 export async function generateQuestionBankQuestions(
   staffId: string,
   subjectId: string,
   input: GenerateQuestionsInput,
   excludeTexts: string[] = []
 ): Promise<GenerateQuestionsResult | null> {
-  const chunks =
-    await retrieveRelevantChunks(
+  console.log(
+    "[QB-AI] Generation started",
+    {
       subjectId,
-      input.topicSource.queryText,
-      input.topicSource.unitId,
-      input.sourceMode ?? null,
-      {
-        /*
-         * Question-paper generation may broaden only
-         * inside the same Unit and same selected
-         * Notes/Syllabus source when semantic retrieval
-         * is too narrow.
-         *
-         * IMPORTANT:
-         * Each uploaded syllabus Unit currently has
-         * one document chunk. Therefore requiring
-         * 4 chunks would incorrectly fail Unit-wise
-         * generation.
-         */
-        broadenWithinUnit:
-          input.topicSource.unitId !== null &&
-          input.sourceMode !== null &&
-          input.sourceMode !== undefined,
+      unitId:
+        input.topicSource.unitId,
+      marks: input.marks,
+      bloomLevel:
+        input.bloomLevel,
+      difficulty:
+        input.difficulty,
+      questionCount:
+        input.questionCount,
+      sourceMode:
+        input.sourceMode,
+      questionType:
+        input.questionType,
+    }
+  );
 
-        /*
-         * FIX:
-         * A Unit is allowed to have a single chunk.
-         * Do not require 4 chunks for generation.
-         */
-        minimumGenerationChunks: 1,
+  /* ---------------------------------------------------------------------- */
+  /* RAG retrieval                                                          */
+  /* ---------------------------------------------------------------------- */
+
+  let chunks;
+
+  try {
+    chunks =
+      await retrieveRelevantChunks(
+        subjectId,
+        input.topicSource.queryText,
+        input.topicSource.unitId,
+        input.sourceMode ?? null,
+        {
+          broadenWithinUnit:
+            input.topicSource.unitId !== null &&
+            input.sourceMode !== null &&
+            input.sourceMode !== undefined,
+
+          minimumGenerationChunks: 1,
+        }
+      );
+  } catch (error) {
+    console.error(
+      "[QB-AI] RAG retrieval failed:",
+      error
+    );
+
+    return null;
+  }
+
+  console.log(
+    "[QB-AI] Retrieved chunks:",
+    chunks.length
+  );
+
+  if (chunks.length === 0) {
+    console.warn(
+      "[QB-AI] No academic chunks found",
+      {
+        subjectId,
+        unitId:
+          input.topicSource.unitId,
+        sourceMode:
+          input.sourceMode,
+        query:
+          input.topicSource.queryText,
       }
     );
 
-  if (chunks.length === 0) {
     return null;
   }
 
   const contextBlock =
-    buildContextBlock(chunks);
+    buildContextBlock(
+      chunks
+    );
 
-  /*
-   * Citations are retained separately.
-   * They never become part of question_text.
-   */
   const citations =
-    chunksToCitations(chunks);
+    chunksToCitations(
+      chunks
+    );
+
+  /* ---------------------------------------------------------------------- */
+  /* Candidate count                                                        */
+  /* ---------------------------------------------------------------------- */
 
   /*
-   * Ask the AI for a few extra candidates in the
-   * SAME request.
+   * Generate extra candidates so duplicate filtering
+   * does not immediately exhaust the requested count.
    */
+
   const candidateQuestionCount =
     Math.min(
-      12,
+      16,
       Math.max(
-        input.questionCount + 3,
+        input.questionCount + 5,
         input.questionCount * 2
       )
     );
+
+  /* ---------------------------------------------------------------------- */
+  /* Prompt                                                                 */
+  /* ---------------------------------------------------------------------- */
 
   const prompt =
     buildQuestionGenerationPrompt(
@@ -1248,8 +1390,32 @@ export async function generateQuestionBankQuestions(
   let raw: string;
 
   try {
-    raw = await generateAiText(prompt);
-  } catch {
+    raw =
+      await generateAiText(
+        prompt
+      );
+
+    console.log(
+      "[QB-AI] AI response received",
+      {
+        length:
+          raw?.length ?? 0,
+      }
+    );
+  } catch (error) {
+    console.error(
+      "[QB-AI] generateAiText failed:",
+      error
+    );
+
+    return null;
+  }
+
+  if (!raw || raw.trim().length === 0) {
+    console.warn(
+      "[QB-AI] Empty AI response"
+    );
+
     return null;
   }
 
@@ -1257,19 +1423,42 @@ export async function generateQuestionBankQuestions(
     raw.trim() ===
     INSUFFICIENT_MATERIAL_MESSAGE
   ) {
+    console.warn(
+      "[QB-AI] AI reported insufficient material"
+    );
+
     return null;
   }
+
+  /* ---------------------------------------------------------------------- */
+  /* Parse                                                                  */
+  /* ---------------------------------------------------------------------- */
 
   const parsedQuestions =
-    parseGeneratedQuestions(raw);
+    parseGeneratedQuestions(
+      raw
+    );
 
-  if (parsedQuestions.length === 0) {
+  console.log(
+    "[QB-AI] Parsed questions:",
+    parsedQuestions.length
+  );
+
+  if (
+    parsedQuestions.length === 0
+  ) {
+    console.warn(
+      "[QB-AI] Could not parse questions",
+      raw.slice(0, 1000)
+    );
+
     return null;
   }
 
-  /*
-   * Defensive source-leak filter.
-   */
+  /* ---------------------------------------------------------------------- */
+  /* Defensive validation                                                   */
+  /* ---------------------------------------------------------------------- */
+
   const questionTexts =
     parsedQuestions
       .map(
@@ -1279,23 +1468,121 @@ export async function generateQuestionBankQuestions(
             .trim()
       )
       .filter(
-        (text) =>
-          text.length > 0 &&
-          !containsQuestionSourceLeak(text) &&
-          questionUsesExpectedBloomVerb(
-            text,
-            input.bloomLevel
-          )
+        (text) => {
+          if (
+            text.length === 0
+          ) {
+            return false;
+          }
+
+          if (
+            containsQuestionSourceLeak(
+              text
+            )
+          ) {
+            console.warn(
+              "[QB-AI] Rejected source leak:",
+              text
+            );
+
+            return false;
+          }
+
+          /*
+           * IMPORTANT:
+           * We keep Bloom validation, but it is no longer
+           * the only reason the entire generation can silently
+           * disappear. Log every rejection.
+           */
+
+          if (
+            !questionUsesExpectedBloomVerb(
+              text,
+              input.bloomLevel
+            )
+          ) {
+            console.warn(
+              "[QB-AI] Rejected Bloom mismatch:",
+              {
+                bloom:
+                  input.bloomLevel,
+                question:
+                  text,
+              }
+            );
+
+            return false;
+          }
+
+          return true;
+        }
       );
 
-  if (questionTexts.length === 0) {
+  console.log(
+    "[QB-AI] Valid questions after filtering:",
+    questionTexts.length
+  );
+
+  /*
+   * Safety fallback:
+   *
+   * If the AI generated valid academic questions but
+   * the strict leading-verb check rejected all of them,
+   * do NOT destroy the entire generation.
+   *
+   * We re-run only the source/privacy validation.
+   */
+
+  let usableQuestionTexts =
+    questionTexts;
+
+  if (
+    usableQuestionTexts.length === 0
+  ) {
+    const relaxedQuestions =
+      parsedQuestions
+        .map(
+          (text) =>
+            text
+              .replace(/\s+/g, " ")
+              .trim()
+        )
+        .filter(
+          (text) =>
+            text.length > 0 &&
+            !containsQuestionSourceLeak(
+              text
+            )
+        );
+
+    console.warn(
+      "[QB-AI] Bloom validation rejected all candidates. Using relaxed academic validation.",
+      {
+        original:
+          parsedQuestions.length,
+        relaxed:
+          relaxedQuestions.length,
+      }
+    );
+
+    usableQuestionTexts =
+      relaxedQuestions;
+  }
+
+  if (
+    usableQuestionTexts.length === 0
+  ) {
+    console.warn(
+      "[QB-AI] No usable questions after validation"
+    );
+
     return null;
   }
 
-  /*
-   * Deduplicate against existing bank questions
-   * for the subject + marks combination.
-   */
+  /* ---------------------------------------------------------------------- */
+  /* Existing duplicate lookup                                              */
+  /* ---------------------------------------------------------------------- */
+
   const existingNormalised =
     await getExistingNormalisedTexts(
       subjectId,
@@ -1309,31 +1596,42 @@ export async function generateQuestionBankQuestions(
       )
     );
 
-  /*
-   * Keep original text as well because normalized
-   * equality alone does not catch paraphrases.
-   */
   const sessionReferenceTexts =
     new Set<string>(
       excludeTexts
     );
 
-  const created: QuestionBankRow[] = [];
+  const created: QuestionBankRow[] =
+    [];
 
   let skippedDuplicates = 0;
 
-  for (const text of questionTexts) {
-    /*
-     * Final safety check before persistence.
-     */
+  /* ---------------------------------------------------------------------- */
+  /* Persist questions                                                       */
+  /* ---------------------------------------------------------------------- */
+
+  for (
+    const text of usableQuestionTexts
+  ) {
     if (
-      containsQuestionSourceLeak(text)
+      created.length >=
+      input.questionCount
+    ) {
+      break;
+    }
+
+    if (
+      containsQuestionSourceLeak(
+        text
+      )
     ) {
       continue;
     }
 
     const normalised =
-      normalizeQuestionText(text);
+      normalizeQuestionText(
+        text
+      );
 
     if (!normalised) {
       continue;
@@ -1352,6 +1650,12 @@ export async function generateQuestionBankQuestions(
       )
     ) {
       skippedDuplicates += 1;
+
+      console.log(
+        "[QB-AI] Duplicate rejected:",
+        text
+      );
+
       continue;
     }
 
@@ -1366,6 +1670,20 @@ export async function generateQuestionBankQuestions(
     sessionReferenceTexts.add(
       text
     );
+
+    /*
+     * IMPORTANT FIX:
+     *
+     * Previously this was always:
+     *
+     * questionType: "descriptive"
+     *
+     * Now the selected question type is preserved.
+     */
+
+    const resolvedQuestionType =
+      (input.questionType ??
+        "descriptive") as QuestionBankQuestionType;
 
     const row =
       await createQuestionBankItem({
@@ -1393,7 +1711,7 @@ export async function generateQuestionBankQuestions(
           input.courseOutcomeId,
 
         questionType:
-          "descriptive",
+          resolvedQuestionType,
 
         source:
           "ai_generated",
@@ -1408,24 +1726,58 @@ export async function generateQuestionBankQuestions(
           false,
       });
 
-    created.push(row);
+    created.push(
+      row
+    );
 
-    if (
-      created.length >=
-      input.questionCount
-    ) {
-      break;
-    }
+    console.log(
+      "[QB-AI] Question created:",
+      {
+        id:
+          row.id,
+        marks:
+          row.marks,
+        unitId:
+          row.unit_id,
+        questionType:
+          row.question_type,
+      }
+    );
   }
 
-  /*
-   * If every generated question was rejected
-   * due to duplication or source leakage,
-   * tell the caller generation did not succeed.
-   */
-  if (created.length === 0) {
+  /* ---------------------------------------------------------------------- */
+  /* Nothing created                                                        */
+  /* ---------------------------------------------------------------------- */
+
+  if (
+    created.length === 0
+  ) {
+    console.warn(
+      "[QB-AI] Generation produced zero new questions",
+      {
+        requested:
+          input.questionCount,
+        parsed:
+          parsedQuestions.length,
+        usable:
+          usableQuestionTexts.length,
+        skippedDuplicates,
+      }
+    );
+
     return null;
   }
+
+  console.log(
+    "[QB-AI] Generation completed:",
+    {
+      requested:
+        input.questionCount,
+      created:
+        created.length,
+      skippedDuplicates,
+    }
+  );
 
   return {
     created,
@@ -1435,25 +1787,28 @@ export async function generateQuestionBankQuestions(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Existing question lookup for deduplication                                */
+/* Existing question lookup                                                  */
 /* -------------------------------------------------------------------------- */
 
 async function getExistingNormalisedTexts(
   subjectId: string,
   marks: number
 ): Promise<Set<string>> {
-  const result = await pool.query<{
-    question_text: string;
-  }>(
-    `SELECT question_text
-     FROM question_bank
-     WHERE subject_id = $1
-       AND marks = $2`,
-    [
-      subjectId,
-      marks,
-    ]
-  );
+  const result =
+    await pool.query<{
+      question_text: string;
+    }>(
+      `
+        SELECT question_text
+        FROM question_bank
+        WHERE subject_id = $1
+          AND marks = $2
+      `,
+      [
+        subjectId,
+        marks,
+      ]
+    );
 
   return new Set(
     result.rows.map(
