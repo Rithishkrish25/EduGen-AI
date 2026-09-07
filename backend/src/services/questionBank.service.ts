@@ -1,4 +1,5 @@
 import { pool } from "../config/database";
+
 import {
   BloomLevel,
   QuestionBankQuestionType,
@@ -7,16 +8,24 @@ import {
   QuestionDifficulty,
   RagCitation,
 } from "../types";
+
 import { generateAiText } from "./aiProvider.service";
 import { TopicSource } from "./academicContent.service";
 import type { QuestionPaperSourceMode } from "./document.service";
-import { QuestionType, QUESTION_TYPE_LABELS, QUESTION_TYPE_PROMPT_GUIDANCE } from "../types/questionType.constants";
+
+import {
+  QuestionType,
+  QUESTION_TYPE_LABELS,
+  QUESTION_TYPE_PROMPT_GUIDANCE,
+} from "../types/questionType.constants";
+
 import {
   buildContextBlock,
   chunksToCitations,
   INSUFFICIENT_MATERIAL_MESSAGE,
   retrieveRelevantChunks,
 } from "./rag.service";
+
 import {
   buildPaginatedResult,
   PaginatedResult,
@@ -24,7 +33,7 @@ import {
 } from "../utils/pagination";
 
 /* -------------------------------------------------------------------------- */
-/* Column list                                                                */
+/* Column list                                                               */
 /* -------------------------------------------------------------------------- */
 
 const QB_COLUMNS = `id, subject_id, unit_id, topic_id, question_text, marks, difficulty, bloom_level,
@@ -32,16 +41,14 @@ const QB_COLUMNS = `id, subject_id, unit_id, topic_id, question_text, marks, dif
   usage_count, last_used_at, created_at, updated_at`;
 
 /* -------------------------------------------------------------------------- */
-/* Normalisation helper                                                       */
+/* Normalisation helper                                                      */
 /* -------------------------------------------------------------------------- */
 
 /**
  * Collapses whitespace, strips punctuation and lowercases a question string
  * so near-identical questions can be compared for deduplication.
  */
-export function normalizeQuestionText(
-  text: string
-): string {
+export function normalizeQuestionText(text: string): string {
   return text
     .toLowerCase()
     .replace(/[^\w\s]/g, "")
@@ -50,22 +57,10 @@ export function normalizeQuestionText(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Source-leak protection                                                     */
+/* Source-leak protection                                                    */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Question papers must contain only the actual exam question.
- *
- * They must NOT expose:
- * - PDF/file names
- * - page numbers from source documents
- * - EduGen AI
- * - uploaded/provided material wording
- * - RAG/context/source references
- */
-function containsQuestionSourceLeak(
-  text: string
-): boolean {
+function containsQuestionSourceLeak(text: string): boolean {
   const value = text.trim();
 
   const forbiddenPatterns: RegExp[] = [
@@ -76,7 +71,7 @@ function containsQuestionSourceLeak(
      * AD3301_Data_Visualization.pdf
      * notes.pdf
      */
-    /\.pdf\b/i,
+    /\b[A-Za-z0-9_.-]+\.pdf\b/i,
 
     /*
      * Product/platform name must never appear
@@ -98,11 +93,11 @@ function containsQuestionSourceLeak(
     /*
      * Explicit source/context wording.
      */
-    /\baccording\s+to\s+(?:the\s+)?(?:provided|uploaded|approved|given)?\s*(?:context|material|materials|document|documents|pdf|file|source|sources)\b/i,
+    /\baccording\s+to\s+(?:the\s+)?(?:(?:provided|uploaded|approved|given)\s+)?(?:context|material|materials|document|documents|pdf|file|source|sources)\b/i,
 
-    /\bbased\s+on\s+(?:the\s+)?(?:provided|uploaded|approved|given)?\s*(?:context|material|materials|document|documents|pdf|file|source|sources)\b/i,
+    /\bbased\s+on\s+(?:the\s+)?(?:(?:provided|uploaded|approved|given)\s+)?(?:context|material|materials|document|documents|pdf|file|source|sources)\b/i,
 
-    /\bfrom\s+(?:the\s+)?(?:provided|uploaded|approved|given)\s+(?:context|material|materials|document|documents|pdf|file|source|sources)\b/i,
+    /\bfrom\s+(?:the\s+)?(?:(?:provided|uploaded|approved|given)\s+)(?:context|material|materials|document|documents|pdf|file|source|sources)\b/i,
 
     /\bprovided\s+(?:academic\s+)?(?:context|material|materials|document|documents|source|sources)\b/i,
 
@@ -116,7 +111,6 @@ function containsQuestionSourceLeak(
     /\bretrieved\s+(?:context|chunk|chunks|material|document)\b/i,
 
     /\bcontext\s+above\b/i,
-
     /\bcontext\s+below\b/i,
 
     /\bsource\s+(?:document|file|material)\b/i,
@@ -126,65 +120,42 @@ function containsQuestionSourceLeak(
     /\bfile\s+(?:name|title)\b/i,
 
     /*
-     * Question explicitly referring to "the text above"
-     * or "the supplied content".
+     * Question explicitly referring to
+     * "the text above" or "the supplied content".
      */
     /\b(?:given|supplied)\s+(?:text|content|document|material)\b/i,
   ];
 
-  return forbiddenPatterns.some(
-    (pattern) => pattern.test(value)
-  );
+  return forbiddenPatterns.some((pattern) => pattern.test(value));
 }
 
 /**
  * Prevent metadata-like topic labels from encouraging
  * the model to repeat a file name or page reference.
  */
-function safeTopicLabel(
-  topicLabel: string
-): string {
+function safeTopicLabel(topicLabel: string): string {
   const cleaned = topicLabel
     /*
      * Remove PDF names.
      */
-    .replace(
-      /[A-Za-z0-9_().\- ]+\.pdf/gi,
-      ""
-    )
+    .replace(/[A-Za-z0-9_(). -]+\.pdf/gi, "")
 
     /*
      * Remove page references.
      */
-    .replace(
-      /\bpage\s+\d+\b/gi,
-      ""
-    )
-
-    .replace(
-      /\bp\.\s*\d+\b/gi,
-      ""
-    )
+    .replace(/\bpage\s+\d+\b/gi, "")
+    .replace(/\bp\.\s*\d+\b/gi, "")
 
     /*
      * Remove EduGen AI wording.
      */
-    .replace(
-      /\bedugen\s*ai\b/gi,
-      ""
-    )
+    .replace(/\bedugen\s*ai\b/gi, "")
 
     /*
      * Clean separators and whitespace.
      */
-    .replace(
-      /[_|]+/g,
-      " "
-    )
-    .replace(
-      /\s+/g,
-      " "
-    )
+    .replace(/[_|]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
   /*
@@ -197,7 +168,7 @@ function safeTopicLabel(
 }
 
 /* -------------------------------------------------------------------------- */
-/* CRUD                                                                       */
+/* CRUD                                                                      */
 /* -------------------------------------------------------------------------- */
 
 export interface CreateQuestionBankItemInput {
@@ -219,29 +190,28 @@ export interface CreateQuestionBankItemInput {
 export async function createQuestionBankItem(
   input: CreateQuestionBankItemInput
 ): Promise<QuestionBankRow> {
-  const result =
-    await pool.query<QuestionBankRow>(
-      `INSERT INTO question_bank
-         (subject_id, unit_id, topic_id, question_text, marks, difficulty, bloom_level,
-          course_outcome_id, question_type, source, source_document_id, created_by, is_approved)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING ${QB_COLUMNS}`,
-      [
-        input.subjectId,
-        input.unitId,
-        input.topicId,
-        input.questionText.trim(),
-        input.marks,
-        input.difficulty,
-        input.bloomLevel,
-        input.courseOutcomeId,
-        input.questionType,
-        input.source,
-        input.sourceDocumentId,
-        input.createdBy,
-        input.isApproved,
-      ]
-    );
+  const result = await pool.query<QuestionBankRow>(
+    `INSERT INTO question_bank
+       (subject_id, unit_id, topic_id, question_text, marks, difficulty, bloom_level,
+        course_outcome_id, question_type, source, source_document_id, created_by, is_approved)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     RETURNING ${QB_COLUMNS}`,
+    [
+      input.subjectId,
+      input.unitId,
+      input.topicId,
+      input.questionText.trim(),
+      input.marks,
+      input.difficulty,
+      input.bloomLevel,
+      input.courseOutcomeId,
+      input.questionType,
+      input.source,
+      input.sourceDocumentId,
+      input.createdBy,
+      input.isApproved,
+    ]
+  );
 
   return result.rows[0];
 }
@@ -249,13 +219,12 @@ export async function createQuestionBankItem(
 export async function getQuestionBankItemById(
   id: string
 ): Promise<QuestionBankRow | null> {
-  const result =
-    await pool.query<QuestionBankRow>(
-      `SELECT ${QB_COLUMNS}
-       FROM question_bank
-       WHERE id = $1`,
-      [id]
-    );
+  const result = await pool.query<QuestionBankRow>(
+    `SELECT ${QB_COLUMNS}
+     FROM question_bank
+     WHERE id = $1`,
+    [id]
+  );
 
   return result.rows[0] ?? null;
 }
@@ -275,32 +244,31 @@ export async function updateQuestionBankItem(
   id: string,
   input: UpdateQuestionBankItemInput
 ): Promise<QuestionBankRow | null> {
-  const result =
-    await pool.query<QuestionBankRow>(
-      `UPDATE question_bank
-       SET question_text = $1,
-           marks = $2,
-           difficulty = $3,
-           bloom_level = $4,
-           course_outcome_id = $5,
-           question_type = $6,
-           unit_id = $7,
-           topic_id = $8,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $9
-       RETURNING ${QB_COLUMNS}`,
-      [
-        input.questionText.trim(),
-        input.marks,
-        input.difficulty,
-        input.bloomLevel,
-        input.courseOutcomeId,
-        input.questionType,
-        input.unitId,
-        input.topicId,
-        id,
-      ]
-    );
+  const result = await pool.query<QuestionBankRow>(
+    `UPDATE question_bank
+     SET question_text = $1,
+         marks = $2,
+         difficulty = $3,
+         bloom_level = $4,
+         course_outcome_id = $5,
+         question_type = $6,
+         unit_id = $7,
+         topic_id = $8,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $9
+     RETURNING ${QB_COLUMNS}`,
+    [
+      input.questionText.trim(),
+      input.marks,
+      input.difficulty,
+      input.bloomLevel,
+      input.courseOutcomeId,
+      input.questionType,
+      input.unitId,
+      input.topicId,
+      id,
+    ]
+  );
 
   return result.rows[0] ?? null;
 }
@@ -309,18 +277,14 @@ export async function setQuestionBankApproval(
   id: string,
   isApproved: boolean
 ): Promise<QuestionBankRow | null> {
-  const result =
-    await pool.query<QuestionBankRow>(
-      `UPDATE question_bank
-       SET is_approved = $1,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
-       RETURNING ${QB_COLUMNS}`,
-      [
-        isApproved,
-        id,
-      ]
-    );
+  const result = await pool.query<QuestionBankRow>(
+    `UPDATE question_bank
+     SET is_approved = $1,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2
+     RETURNING ${QB_COLUMNS}`,
+    [isApproved, id]
+  );
 
   return result.rows[0] ?? null;
 }
@@ -329,18 +293,14 @@ export async function setQuestionBankActiveStatus(
   id: string,
   isActive: boolean
 ): Promise<QuestionBankRow | null> {
-  const result =
-    await pool.query<QuestionBankRow>(
-      `UPDATE question_bank
-       SET is_active = $1,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
-       RETURNING ${QB_COLUMNS}`,
-      [
-        isActive,
-        id,
-      ]
-    );
+  const result = await pool.query<QuestionBankRow>(
+    `UPDATE question_bank
+     SET is_active = $1,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2
+     RETURNING ${QB_COLUMNS}`,
+    [isActive, id]
+  );
 
   return result.rows[0] ?? null;
 }
@@ -351,14 +311,12 @@ export async function deleteQuestionBankItem(
   await pool.query(
     `DELETE FROM question_bank
      WHERE id = $1`,
-    [
-      id,
-    ]
+    [id]
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/* List / filter                                                              */
+/* List / filter                                                             */
 /* -------------------------------------------------------------------------- */
 
 export interface QuestionBankFilters {
@@ -378,16 +336,12 @@ export async function listQuestionBank(
   subjectId: string,
   filters: QuestionBankFilters,
   pagination: PaginationParams
-): Promise<
-  PaginatedResult<QuestionBankRow>
-> {
+): Promise<PaginatedResult<QuestionBankRow>> {
   const conditions: string[] = [
     "subject_id = $1",
   ];
 
-  const values: unknown[] = [
-    subjectId,
-  ];
+  const values: unknown[] = [subjectId];
 
   const add = (
     expr: string,
@@ -400,82 +354,45 @@ export async function listQuestionBank(
     );
   };
 
-  if (
-    filters.unitId !== undefined
-  ) {
-    add(
-      "unit_id",
-      filters.unitId
-    );
+  if (filters.unitId !== undefined) {
+    add("unit_id", filters.unitId);
   }
 
-  if (
-    filters.topicId !== undefined
-  ) {
-    add(
-      "topic_id",
-      filters.topicId
-    );
+  if (filters.topicId !== undefined) {
+    add("topic_id", filters.topicId);
   }
 
-  if (
-    filters.marks !== undefined
-  ) {
-    add(
-      "marks",
-      filters.marks
-    );
+  if (filters.marks !== undefined) {
+    add("marks", filters.marks);
   }
 
-  if (
-    filters.difficulty !== undefined
-  ) {
-    add(
-      "difficulty",
-      filters.difficulty
-    );
+  if (filters.difficulty !== undefined) {
+    add("difficulty", filters.difficulty);
   }
 
-  if (
-    filters.bloomLevel !== undefined
-  ) {
-    add(
-      "bloom_level",
-      filters.bloomLevel
-    );
+  if (filters.bloomLevel !== undefined) {
+    add("bloom_level", filters.bloomLevel);
   }
 
-  if (
-    filters.courseOutcomeId !==
-    undefined
-  ) {
+  if (filters.courseOutcomeId !== undefined) {
     add(
       "course_outcome_id",
       filters.courseOutcomeId
     );
   }
 
-  if (
-    filters.source !== undefined
-  ) {
-    add(
-      "source",
-      filters.source
-    );
+  if (filters.source !== undefined) {
+    add("source", filters.source);
   }
 
-  if (
-    filters.isApproved !== undefined
-  ) {
+  if (filters.isApproved !== undefined) {
     add(
       "is_approved",
       filters.isApproved
     );
   }
 
-  if (
-    filters.isActive !== undefined
-  ) {
+  if (filters.isActive !== undefined) {
     add(
       "is_active",
       filters.isActive
@@ -483,35 +400,27 @@ export async function listQuestionBank(
   }
 
   if (filters.search) {
-    values.push(
-      `%${filters.search}%`
-    );
+    values.push(`%${filters.search}%`);
 
     conditions.push(
       `question_text ILIKE $${values.length}`
     );
   }
 
-  const where =
-    `WHERE ${conditions.join(
-      " AND "
-    )}`;
+  const where = `WHERE ${conditions.join(" AND ")}`;
 
-  const countResult =
-    await pool.query<{
-      count: string;
-    }>(
-      `SELECT COUNT(*)
-       FROM question_bank
-       ${where}`,
-      values
-    );
+  const countResult = await pool.query<{
+    count: string;
+  }>(
+    `SELECT COUNT(*)
+     FROM question_bank
+     ${where}`,
+    values
+  );
 
-  const total =
-    Number(
-      countResult.rows[0]?.count ??
-        0
-    );
+  const total = Number(
+    countResult.rows[0]?.count ?? 0
+  );
 
   const dataValues = [
     ...values,
@@ -519,20 +428,15 @@ export async function listQuestionBank(
     pagination.offset,
   ];
 
-  const result =
-    await pool.query<QuestionBankRow>(
-      `SELECT ${QB_COLUMNS}
-       FROM question_bank
-       ${where}
-       ORDER BY created_at DESC
-       LIMIT $${
-         dataValues.length - 1
-       }
-       OFFSET $${
-         dataValues.length
-       }`,
-      dataValues
-    );
+  const result = await pool.query<QuestionBankRow>(
+    `SELECT ${QB_COLUMNS}
+     FROM question_bank
+     ${where}
+     ORDER BY created_at DESC
+     LIMIT $${dataValues.length - 1}
+     OFFSET $${dataValues.length}`,
+    dataValues
+  );
 
   return buildPaginatedResult(
     result.rows,
@@ -572,9 +476,7 @@ export async function findApprovedBankQuestions(
     "is_active = TRUE",
   ];
 
-  const values: unknown[] = [
-    subjectId,
-  ];
+  const values: unknown[] = [subjectId];
 
   const add = (
     expr: string,
@@ -587,45 +489,29 @@ export async function findApprovedBankQuestions(
     );
   };
 
-  if (
-    filters.unitId != null
-  ) {
-    add(
-      "unit_id",
-      filters.unitId
-    );
+  if (filters.unitId != null) {
+    add("unit_id", filters.unitId);
   }
 
-  if (
-    filters.difficulty !== undefined
-  ) {
+  if (filters.difficulty !== undefined) {
     add(
       "difficulty",
       filters.difficulty
     );
   }
 
-  if (
-    filters.marks !== undefined
-  ) {
-    add(
-      "marks",
-      filters.marks
-    );
+  if (filters.marks !== undefined) {
+    add("marks", filters.marks);
   }
 
-  if (
-    filters.bloomLevel !== undefined
-  ) {
+  if (filters.bloomLevel !== undefined) {
     add(
       "bloom_level",
       filters.bloomLevel
     );
   }
 
-  if (
-    filters.courseOutcomeId != null
-  ) {
+  if (filters.courseOutcomeId != null) {
     add(
       "course_outcome_id",
       filters.courseOutcomeId
@@ -636,9 +522,7 @@ export async function findApprovedBankQuestions(
     filters.excludeIds &&
     filters.excludeIds.length > 0
   ) {
-    values.push(
-      filters.excludeIds
-    );
+    values.push(filters.excludeIds);
 
     conditions.push(
       `id != ALL($${values.length}::uuid[])`
@@ -650,26 +534,22 @@ export async function findApprovedBankQuestions(
    * source-leaking historical questions may be
    * removed after the database query.
    */
-  const fetchLimit =
-    Math.max(
-      limit * 4,
-      40
-    );
+  const fetchLimit = Math.max(
+    limit * 4,
+    40
+  );
 
   values.push(fetchLimit);
 
-  const result =
-    await pool.query<QuestionBankRow>(
-      `SELECT ${QB_COLUMNS}
-       FROM question_bank
-       WHERE ${conditions.join(
-         " AND "
-       )}
-       ORDER BY usage_count ASC,
-                RANDOM()
-       LIMIT $${values.length}`,
-      values
-    );
+  const result = await pool.query<QuestionBankRow>(
+    `SELECT ${QB_COLUMNS}
+     FROM question_bank
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY usage_count ASC,
+              RANDOM()
+     LIMIT $${values.length}`,
+    values
+  );
 
   return result.rows
     .filter(
@@ -678,14 +558,11 @@ export async function findApprovedBankQuestions(
           row.question_text
         )
     )
-    .slice(
-      0,
-      limit
-    );
+    .slice(0, limit);
 }
 
 /* -------------------------------------------------------------------------- */
-/* Usage tracking                                                             */
+/* Usage tracking                                                            */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -695,9 +572,7 @@ export async function findApprovedBankQuestions(
 export async function markQuestionBankItemsUsed(
   ids: string[]
 ): Promise<void> {
-  if (
-    ids.length === 0
-  ) {
+  if (ids.length === 0) {
     return;
   }
 
@@ -707,22 +582,25 @@ export async function markQuestionBankItemsUsed(
          last_used_at = CURRENT_TIMESTAMP,
          updated_at = CURRENT_TIMESTAMP
      WHERE id = ANY($1::uuid[])`,
-    [
-      ids,
-    ]
+    [ids]
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI generation                                                              */
+/* AI generation                                                             */
 /* -------------------------------------------------------------------------- */
 
 export interface GenerateQuestionsInput {
   topicSource: TopicSource;
+
   marks: number;
+
   difficulty: QuestionDifficulty;
+
   bloomLevel: BloomLevel;
+
   courseOutcomeId: string | null;
+
   questionCount: number;
 
   /**
@@ -741,8 +619,6 @@ export interface GenerateQuestionsInput {
 
   /**
    * Optional question type constraint.
-   * When non-null, the AI prompt is augmented with a type-specific instruction.
-   * When null or undefined, existing behaviour is preserved with no type constraint.
    */
   questionType?: QuestionType | null;
 }
@@ -754,53 +630,49 @@ export interface GenerateQuestionsResult {
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI candidate diversity helpers                                             */
+/* AI candidate diversity helpers                                            */
 /* -------------------------------------------------------------------------- */
 
-const AI_GENERATION_NEAR_DUPLICATE_THRESHOLD =
-  0.78;
+const AI_GENERATION_NEAR_DUPLICATE_THRESHOLD = 0.78;
 
-const AI_GENERATION_STOP_WORDS =
-  new Set([
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "be",
-    "by",
-    "define",
-    "describe",
-    "discuss",
-    "explain",
-    "for",
-    "from",
-    "how",
-    "identify",
-    "in",
-    "is",
-    "list",
-    "of",
-    "on",
-    "or",
-    "outline",
-    "state",
-    "the",
-    "to",
-    "using",
-    "what",
-    "which",
-    "why",
-    "with",
-    "write",
-  ]);
+const AI_GENERATION_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "be",
+  "by",
+  "define",
+  "describe",
+  "discuss",
+  "explain",
+  "for",
+  "from",
+  "how",
+  "identify",
+  "in",
+  "is",
+  "list",
+  "of",
+  "on",
+  "or",
+  "outline",
+  "state",
+  "the",
+  "to",
+  "using",
+  "what",
+  "which",
+  "why",
+  "with",
+  "write",
+]);
 
 function generationSimilarityTokens(
   text: string
 ): string[] {
-  return normalizeQuestionText(
-    text
-  )
+  return normalizeQuestionText(text)
     .split(/[^a-z0-9]+/i)
     .map((token) =>
       token.trim().toLowerCase()
@@ -808,9 +680,7 @@ function generationSimilarityTokens(
     .filter(
       (token) =>
         token.length > 1 &&
-        !AI_GENERATION_STOP_WORDS.has(
-          token
-        )
+        !AI_GENERATION_STOP_WORDS.has(token)
     );
 }
 
@@ -819,14 +689,10 @@ function generatedQuestionSimilarity(
   secondText: string
 ): number {
   const first =
-    generationSimilarityTokens(
-      firstText
-    );
+    generationSimilarityTokens(firstText);
 
   const second =
-    generationSimilarityTokens(
-      secondText
-    );
+    generationSimilarityTokens(secondText);
 
   if (
     first.length === 0 ||
@@ -835,11 +701,8 @@ function generatedQuestionSimilarity(
     return 0;
   }
 
-  const firstSet =
-    new Set(first);
-
-  const secondSet =
-    new Set(second);
+  const firstSet = new Set(first);
+  const secondSet = new Set(second);
 
   let intersection = 0;
 
@@ -855,11 +718,10 @@ function generatedQuestionSimilarity(
       ...secondSet,
     ]).size;
 
-  const smaller =
-    Math.min(
-      firstSet.size,
-      secondSet.size
-    );
+  const smaller = Math.min(
+    firstSet.size,
+    secondSet.size
+  );
 
   const jaccard =
     union > 0
@@ -882,16 +744,12 @@ function isNearDuplicateGeneratedQuestion(
   existingTexts: Iterable<string>
 ): boolean {
   const normalizedCandidate =
-    normalizeQuestionText(
-      candidate
-    );
+    normalizeQuestionText(candidate);
 
   for (const existing of existingTexts) {
     if (
       normalizedCandidate ===
-      normalizeQuestionText(
-        existing
-      )
+      normalizeQuestionText(existing)
     ) {
       return true;
     }
@@ -929,18 +787,9 @@ function marksDepthGuidance(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Bloom Action Verb Guidance                                                 */
+/* Bloom Action Verb Guidance                                                */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Preferred action verbs based on the Revised Bloom's Taxonomy faculty
- * reference. L1-L3 are intentionally kept distinct because Regulation 2021
- * uses only these levels.
- *
- * L1 -> remembering
- * L2 -> understanding
- * L3 -> applying
- */
 const BLOOM_ACTION_VERBS: Record<
   BloomLevel,
   string[]
@@ -1039,27 +888,17 @@ const BLOOM_ACTION_VERBS: Record<
 function bloomVerbGuidance(
   bloomLevel: BloomLevel
 ): string {
-  return BLOOM_ACTION_VERBS[
-    bloomLevel
-  ].join(", ");
+  return BLOOM_ACTION_VERBS[bloomLevel].join(
+    ", "
+  );
 }
 
-/**
- * For Regulation 2021 levels L1-L3, require the leading command phrase to
- * actually reflect the requested Bloom level. This prevents rows tagged L3
- * from being generated with an L1-style command such as "Define".
- */
 function questionUsesExpectedBloomVerb(
   questionText: string,
   bloomLevel: BloomLevel
 ): boolean {
   if (
-    ![
-      "L1",
-      "L2",
-      "L3",
-      "L4",
-    ].includes(
+    !["L1", "L2", "L3", "L4"].includes(
       bloomLevel
     )
   ) {
@@ -1077,30 +916,27 @@ function questionUsesExpectedBloomVerb(
 
   return BLOOM_ACTION_VERBS[
     bloomLevel
-  ].some(
-    (verb) => {
-      const lowerVerb =
-        verb.toLowerCase();
+  ].some((verb) => {
+    const lowerVerb =
+      verb.toLowerCase();
 
-      return (
-        normalized ===
-          lowerVerb ||
-        normalized.startsWith(
-          `${lowerVerb} `
-        ) ||
-        normalized.startsWith(
-          `${lowerVerb}:`
-        ) ||
-        normalized.startsWith(
-          `${lowerVerb}?`
-        )
-      );
-    }
-  );
+    return (
+      normalized === lowerVerb ||
+      normalized.startsWith(
+        `${lowerVerb} `
+      ) ||
+      normalized.startsWith(
+        `${lowerVerb}:`
+      ) ||
+      normalized.startsWith(
+        `${lowerVerb}?`
+      )
+    );
+  });
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI prompt                                                                  */
+/* AI prompt                                                                 */
 /* -------------------------------------------------------------------------- */
 
 function buildQuestionGenerationPrompt(
@@ -1135,9 +971,7 @@ function buildQuestionGenerationPrompt(
   };
 
   const cleanTopicLabel =
-    safeTopicLabel(
-      topicLabel
-    );
+    safeTopicLabel(topicLabel);
 
   const sourceScopeNote =
     topicLabel.trim().length > 0
@@ -1147,31 +981,28 @@ function buildQuestionGenerationPrompt(
   const exclusionNote =
     excludeTexts.length > 0
       ? `
-
 ALREADY USED QUESTIONS:
+
 Do NOT repeat, paraphrase too closely, or generate a question with the same core idea as these:
+
 ${excludeTexts
-  .slice(
-    0,
-    30
-  )
+  .slice(0, 30)
   .map(
-    (
-      text,
-      index
-    ) =>
+    (text, index) =>
       `${index + 1}. ${text}`
   )
-  .join("\n")}`
+  .join("\n")}
+`
       : "";
 
   const questionTypeInstruction =
     questionType != null
       ? `
-
 QUESTION TYPE CONSTRAINT:
+
 - Question type: ${QUESTION_TYPE_LABELS[questionType]}
-- ${QUESTION_TYPE_PROMPT_GUIDANCE[questionType]}`
+- ${QUESTION_TYPE_PROMPT_GUIDANCE[questionType]}
+`
       : "";
 
   return `
@@ -1180,9 +1011,11 @@ You are an experienced college faculty member preparing an official university-s
 Generate exactly ${questionCount} candidate exam question(s).
 
 ACADEMIC TOPIC / UNIT SCOPE:
+
 ${cleanTopicLabel}
 
 QUESTION REQUIREMENTS:
+
 - Each question must be worth exactly ${marks} mark(s).
 - Difficulty level: ${difficultyLabel[difficulty]}.
 - Bloom's Taxonomy level: ${bloomLabel[bloomLevel]}.
@@ -1204,6 +1037,7 @@ QUESTION REQUIREMENTS:
 - Do not add numbering because numbering is added separately by the question-paper system.
 
 TOPIC -> SUB-TOPIC EXPANSION RULES:
+
 - A syllabus or note may contain only one or a few MAIN TOPICS. Do NOT treat a small number of topic headings as insufficient by itself.
 - First inspect the academic context and identify the supported sub-topics, components, stages, operations, properties, mechanisms, comparisons, applications, advantages, limitations, relationships or examples that are actually present.
 - A sub-topic may be used ONLY when the underlying concept is explicitly present or clearly supported by the supplied academic context.
@@ -1214,10 +1048,11 @@ TOPIC -> SUB-TOPIC EXPANSION RULES:
 - Vary the academic angle when valid: definition, purpose, working/process, component role, comparison, application, analysis, advantages/limitations, relationship or design reasoning.
 - Do NOT invent an unrelated topic merely to create variety.
 - Do NOT move to another Unit or another source type.
-- Different wording with the same core idea is NOT enough; use a genuinely different supported aspect whenever possible.
+
 ${questionTypeInstruction}
 
 STRICT SOURCE PRIVACY RULES:
+
 - NEVER mention a PDF name.
 - NEVER mention a file name.
 - NEVER mention a document name.
@@ -1237,18 +1072,23 @@ STRICT SOURCE PRIVACY RULES:
 - NEVER reveal where the academic information came from.
 
 IMPORTANT:
+
 The academic context is only evidence for understanding the permitted course content.
+
 The student seeing the final question must NOT know that a PDF, RAG system, file, page, source, or AI system was used.
 
 ${exclusionNote}
 
 APPROVED ACADEMIC CONTEXT:
+
 ${contextBlock}
 
 OUTPUT FORMAT:
+
 Return ONLY a valid JSON array containing exactly ${questionCount} question string(s).
 
 Do not include:
+
 - explanations
 - citations
 - sources
@@ -1259,49 +1099,40 @@ Do not include:
 - JSON object keys
 
 Example:
+
 ["Explain the significance of exploratory data analysis.","Illustrate the major stages involved in exploratory data analysis."]
 `.trim();
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI response parser                                                         */
+/* AI response parser                                                        */
 /* -------------------------------------------------------------------------- */
 
 function parseGeneratedQuestions(
   raw: string
 ): string[] {
-  const cleaned =
-    raw
-      .trim()
-      .replace(
-        /^```(?:json)?/i,
-        ""
-      )
-      .replace(
-        /```$/,
-        ""
-      )
-      .trim();
+  const cleaned = raw
+    .trim()
+    .replace(
+      /^```(?:json)?/i,
+      ""
+    )
+    .replace(
+      /```$/,
+      ""
+    )
+    .trim();
 
   try {
-    const parsed =
-      JSON.parse(
-        cleaned
-      );
+    const parsed = JSON.parse(cleaned);
 
-    if (
-      Array.isArray(
-        parsed
-      )
-    ) {
+    if (Array.isArray(parsed)) {
       return parsed.filter(
         (
           item
         ): item is string =>
-          typeof item ===
-            "string" &&
-          item.trim().length >
-            0
+          typeof item === "string" &&
+          item.trim().length > 0
       );
     }
   } catch {
@@ -1315,19 +1146,17 @@ function parseGeneratedQuestions(
       /"([^"]+)"/g
     ),
   ].map(
-    (match) =>
-      match[1]
+    (match) => match[1]
   );
 
   return matches.filter(
     (text) =>
-      text.trim().length >
-      0
+      text.trim().length > 0
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI-generated question-bank questions                                       */
+/* AI-generated question-bank questions                                      */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -1343,9 +1172,7 @@ export async function generateQuestionBankQuestions(
   subjectId: string,
   input: GenerateQuestionsInput,
   excludeTexts: string[] = []
-): Promise<
-  GenerateQuestionsResult | null
-> {
+): Promise<GenerateQuestionsResult | null> {
   const chunks =
     await retrieveRelevantChunks(
       subjectId,
@@ -1354,44 +1181,48 @@ export async function generateQuestionBankQuestions(
       input.sourceMode ?? null,
       {
         /*
-         * Question-paper generation may broaden only inside the same Unit
-         * and same selected Notes/Syllabus source when semantic retrieval is
-         * too narrow. General Ask AI behaviour is unchanged.
+         * Question-paper generation may broaden only
+         * inside the same Unit and same selected
+         * Notes/Syllabus source when semantic retrieval
+         * is too narrow.
+         *
+         * IMPORTANT:
+         * Each uploaded syllabus Unit currently has
+         * one document chunk. Therefore requiring
+         * 4 chunks would incorrectly fail Unit-wise
+         * generation.
          */
         broadenWithinUnit:
           input.topicSource.unitId !== null &&
           input.sourceMode !== null &&
           input.sourceMode !== undefined,
 
-        minimumGenerationChunks: 4,
+        /*
+         * FIX:
+         * A Unit is allowed to have a single chunk.
+         * Do not require 4 chunks for generation.
+         */
+        minimumGenerationChunks: 1,
       }
     );
 
-  if (
-    chunks.length === 0
-  ) {
+  if (chunks.length === 0) {
     return null;
   }
 
   const contextBlock =
-    buildContextBlock(
-      chunks
-    );
+    buildContextBlock(chunks);
 
   /*
    * Citations are retained separately.
    * They never become part of question_text.
    */
   const citations =
-    chunksToCitations(
-      chunks
-    );
+    chunksToCitations(chunks);
 
   /*
-   * Ask the AI for a few extra candidates in the SAME request. The service
-   * then keeps only the required number after exact + near-duplicate checks.
-   * This reduces repeated API calls when a split question needs an alternate
-   * sub-topic/angle.
+   * Ask the AI for a few extra candidates in the
+   * SAME request.
    */
   const candidateQuestionCount =
     Math.min(
@@ -1417,10 +1248,7 @@ export async function generateQuestionBankQuestions(
   let raw: string;
 
   try {
-    raw =
-      await generateAiText(
-        prompt
-      );
+    raw = await generateAiText(prompt);
   } catch {
     return null;
   }
@@ -1433,52 +1261,34 @@ export async function generateQuestionBankQuestions(
   }
 
   const parsedQuestions =
-    parseGeneratedQuestions(
-      raw
-    );
+    parseGeneratedQuestions(raw);
 
-  if (
-    parsedQuestions.length ===
-    0
-  ) {
+  if (parsedQuestions.length === 0) {
     return null;
   }
 
   /*
    * Defensive source-leak filter.
-   *
-   * Even if the AI ignores the prompt,
-   * questions containing source information
-   * are rejected instead of being saved.
    */
   const questionTexts =
     parsedQuestions
       .map(
         (text) =>
           text
-            .replace(
-              /\s+/g,
-              " "
-            )
+            .replace(/\s+/g, " ")
             .trim()
       )
       .filter(
         (text) =>
-          text.length >
-            0 &&
-          !containsQuestionSourceLeak(
-            text
-          ) &&
+          text.length > 0 &&
+          !containsQuestionSourceLeak(text) &&
           questionUsesExpectedBloomVerb(
             text,
             input.bloomLevel
           )
       );
 
-  if (
-    questionTexts.length ===
-    0
-  ) {
+  if (questionTexts.length === 0) {
     return null;
   }
 
@@ -1500,41 +1310,32 @@ export async function generateQuestionBankQuestions(
     );
 
   /*
-   * Keep the original text as well because normalized equality alone does
-   * not catch paraphrases with the same core idea.
+   * Keep original text as well because normalized
+   * equality alone does not catch paraphrases.
    */
   const sessionReferenceTexts =
     new Set<string>(
       excludeTexts
     );
 
-  const created: QuestionBankRow[] =
-    [];
+  const created: QuestionBankRow[] = [];
 
   let skippedDuplicates = 0;
 
-  for (
-    const text of questionTexts
-  ) {
+  for (const text of questionTexts) {
     /*
      * Final safety check before persistence.
      */
     if (
-      containsQuestionSourceLeak(
-        text
-      )
+      containsQuestionSourceLeak(text)
     ) {
       continue;
     }
 
     const normalised =
-      normalizeQuestionText(
-        text
-      );
+      normalizeQuestionText(text);
 
-    if (
-      !normalised
-    ) {
+    if (!normalised) {
       continue;
     }
 
@@ -1551,7 +1352,6 @@ export async function generateQuestionBankQuestions(
       )
     ) {
       skippedDuplicates += 1;
-
       continue;
     }
 
@@ -1568,51 +1368,47 @@ export async function generateQuestionBankQuestions(
     );
 
     const row =
-      await createQuestionBankItem(
-        {
-          subjectId,
+      await createQuestionBankItem({
+        subjectId,
 
-          unitId:
-            input.topicSource.unitId,
+        unitId:
+          input.topicSource.unitId,
 
-          topicId:
-            input.topicSource.topicId,
+        topicId:
+          input.topicSource.topicId,
 
-          questionText:
-            text,
+        questionText:
+          text,
 
-          marks:
-            input.marks,
+        marks:
+          input.marks,
 
-          difficulty:
-            input.difficulty,
+        difficulty:
+          input.difficulty,
 
-          bloomLevel:
-            input.bloomLevel,
+        bloomLevel:
+          input.bloomLevel,
 
-          courseOutcomeId:
-            input.courseOutcomeId,
+        courseOutcomeId:
+          input.courseOutcomeId,
 
-          questionType:
-            "descriptive",
+        questionType:
+          "descriptive",
 
-          source:
-            "ai_generated",
+        source:
+          "ai_generated",
 
-          sourceDocumentId:
-            null,
+        sourceDocumentId:
+          null,
 
-          createdBy:
-            staffId,
+        createdBy:
+          staffId,
 
-          isApproved:
-            false,
-        }
-      );
+        isApproved:
+          false,
+      });
 
-    created.push(
-      row
-    );
+    created.push(row);
 
     if (
       created.length >=
@@ -1626,13 +1422,8 @@ export async function generateQuestionBankQuestions(
    * If every generated question was rejected
    * due to duplication or source leakage,
    * tell the caller generation did not succeed.
-   *
-   * Regulation 2021 generator can then retry
-   * the missing required slots.
    */
-  if (
-    created.length === 0
-  ) {
+  if (created.length === 0) {
     return null;
   }
 
@@ -1644,26 +1435,25 @@ export async function generateQuestionBankQuestions(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Existing question lookup for deduplication                                 */
+/* Existing question lookup for deduplication                                */
 /* -------------------------------------------------------------------------- */
 
 async function getExistingNormalisedTexts(
   subjectId: string,
   marks: number
 ): Promise<Set<string>> {
-  const result =
-    await pool.query<{
-      question_text: string;
-    }>(
-      `SELECT question_text
-       FROM question_bank
-       WHERE subject_id = $1
-         AND marks = $2`,
-      [
-        subjectId,
-        marks,
-      ]
-    );
+  const result = await pool.query<{
+    question_text: string;
+  }>(
+    `SELECT question_text
+     FROM question_bank
+     WHERE subject_id = $1
+       AND marks = $2`,
+    [
+      subjectId,
+      marks,
+    ]
+  );
 
   return new Set(
     result.rows.map(
