@@ -533,12 +533,19 @@ async function generateQuizQuestionsFromMaterial(
   excludeTexts: string[]
 ): Promise<RawQuizQuestion[] | null> {
   const chunks = await retrieveRelevantChunks(subjectId, topicSource.queryText);
+
+  console.log("QUIZ DEBUG - requested question count:", questionCount);
+  console.log("QUIZ DEBUG - topic:", topicSource.label);
+  console.log("QUIZ DEBUG - retrieved chunks:", chunks.length);
+
   if (chunks.length === 0) {
+    console.log("QUIZ DEBUG - no relevant chunks found");
     return null;
   }
 
   const contextBlock = buildContextBlock(chunks);
   const typesList = questionTypes.join(", ");
+
   const exclusionBlock =
     excludeTexts.length > 0
       ? `\nDo not repeat or closely resemble any of these existing questions:\n${excludeTexts
@@ -576,7 +583,17 @@ JSON array:`;
     'A non-empty JSON array of quiz question objects, each with "questionText", "questionType" ("mcq"|"multiple_select"|"true_false"|"fill_blank"), "options" (array of strings, required for mcq/multiple_select), "correctAnswer" (matching the question type), and "explanation" (string).'
   );
 
-  return dedupeByText(parsed, (item) => item.questionText).slice(0, questionCount);
+  console.log("QUIZ DEBUG - AI returned:", parsed.length);
+
+  const deduped = dedupeByText(parsed, (item) => item.questionText);
+
+  console.log("QUIZ DEBUG - after dedupe:", deduped.length);
+
+  const finalQuestions = deduped.slice(0, questionCount);
+
+  console.log("QUIZ DEBUG - final questions:", finalQuestions.length);
+
+  return finalQuestions;
 }
 
 function computeQuizType(questionTypes: QuizQuestionType[]): QuizType {
@@ -730,6 +747,8 @@ export async function createAiQuizDraft(
     return null;
   }
 
+  console.log("QUIZ DEBUG - createAiQuizDraft generated:", generated.length);
+
   const quizType = computeQuizType(generated.map((q) => q.questionType));
 
   const quizResult = await pool.query<QuizRow>(
@@ -763,6 +782,8 @@ export async function createAiQuizDraft(
   for (let index = 0; index < generated.length; index += 1) {
     questions.push(await insertQuizQuestion(quiz.id, generated[index], index, "ai_generated"));
   }
+
+  console.log("QUIZ DEBUG - DB inserted questions:", questions.length);
 
   return { quiz, questions };
 }
